@@ -1,6 +1,6 @@
 {
   "name": "game-translator",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -9,8 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "electron:dev": "electron .",
-    "electron:build": "next build && node scripts/prepare-build.js && electron-builder",
-    "electron:pack": "next build && node scripts/prepare-build.js && electron-builder --dir"
+    "electron:build": "next build && python scripts/build-backend.py && node scripts/prepare-build.js && electron-builder",
+    "electron:pack": "next build && python scripts/build-backend.py && node scripts/prepare-build.js && electron-builder --dir"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.4",
@@ -55,12 +55,8 @@
         "to": "frontend"
       },
       {
-        "from": "backend",
-        "to": "backend",
-        "filter": [
-          "**/*.py",
-          "*.txt"
-        ]
+        "from": "dist/backend-dist",
+        "to": "backend-dist"
       },
       {
         "from": "data",
@@ -71,13 +67,11 @@
       }
     ],
     "win": {
-      "target": "nsis",
-      "icon": "electron/icon.ico"
+      "target": "nsis"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "electron/icon.ico"
+      "allowToChangeInstallationDirectory": true
     },
     "publish": {
       "provider": "generic",

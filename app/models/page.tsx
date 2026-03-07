@@ -17,14 +17,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useLocale } from "@/hooks/use-locale"
 import { api } from "@/lib/api"
+import type { TranslationKey } from "@/lib/i18n"
 
 interface ModelInfo {
   id: string
   name: string
   desc: string
+  desc_key?: TranslationKey
   size: string
   speed: string
+  speed_key?: TranslationKey
   quality: string
+  quality_key?: TranslationKey
   installed: boolean
 }
 
