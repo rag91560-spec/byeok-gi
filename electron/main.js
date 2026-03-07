@@ -76,16 +76,16 @@ async function startBackend() {
     console.log("[electron] Backend already running on port", BACKEND_PORT)
     return
   }
-  const pythonCmd = findPython()
-  if (!pythonCmd) {
-    dialog.showErrorBox(
-      "Python Not Found",
-      "Python is required to run the backend.\nPlease install Python 3.10+ from https://python.org and restart the app."
-    )
-    return
-  }
   console.log("[electron] Starting backend...")
   if (isDev) {
+    const pythonCmd = findPython()
+    if (!pythonCmd) {
+      dialog.showErrorBox(
+        "Python Not Found",
+        "Python is required to run the backend in dev mode.\nPlease install Python 3.10+ from https://python.org and restart the app."
+      )
+      return
+    }
     backendProcess = spawn(
       pythonCmd,
       [
@@ -97,17 +97,18 @@ async function startBackend() {
       { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }
     )
   } else {
-    // Production: run Python backend from resources
-    const resourceBase = path.join(process.resourcesPath)
+    // Production: run PyInstaller-built backend.exe
+    const backendExe = path.join(process.resourcesPath, "backend-dist", "backend.exe")
+    const dataDir = path.join(process.resourcesPath, "data")
     backendProcess = spawn(
-      pythonCmd,
+      backendExe,
       [
-        "-m", "uvicorn", "backend.server:app",
         "--host", "127.0.0.1",
         "--port", String(BACKEND_PORT),
+        "--data-dir", dataDir,
       ],
       {
-        cwd: resourceBase,
+        cwd: path.join(process.resourcesPath, "backend-dist"),
         stdio: ["ignore", "pipe", "pipe"],
       }
     )
@@ -171,8 +172,34 @@ function createWindow() {
 
   mainWindow.loadURL(`http://localhost:${FRONTEND_PORT}`)
 
-  mainWindow.once("ready-to-show", () => {
+  // Show window when ready, with timeout fallback
+  let shown = false
+  const showOnce = () => {
+    if (shown || !mainWindow) return
+    shown = true
     mainWindow.show()
+  }
+
+  mainWindow.once("ready-to-show", showOnce)
+
+  // Fallback: force show after 15s even if page fails to load
+  setTimeout(showOnce, 15000)
+
+  // Handle load failure — show error page instead of staying hidden
+  mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDesc, validatedURL) => {
+    console.error(`[electron] Page load failed: ${errorCode} ${errorDesc} (${validatedURL})`)
+    showOnce()
+    mainWindow.webContents.loadURL(`data:text/html;charset=utf-8,
+      <html><body style="background:#0c0c0f;color:#e0e0e0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:16px">
+        <h2>서버 시작 실패</h2>
+        <p style="color:#888;font-size:14px">프론트엔드 서버에 연결할 수 없습니다 (${errorDesc})</p>
+        <p style="color:#666;font-size:12px">Python이 설치되어 있는지 확인하고, 앱을 재시작해주세요.</p>
+        <button onclick="location.href='http://localhost:${FRONTEND_PORT}'"
+          style="margin-top:8px;padding:8px 20px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">
+          다시 시도
+        </button>
+      </body></html>
+    `)
   })
 
   // Inject Electron-specific CSS (drag region, titlebar padding)
@@ -400,9 +427,10 @@ app.whenReady().then(async () => {
       waitForServer(FRONTEND_PORT, 30000),
     ])
   } catch (err) {
-    console.error("[electron]", err.message)
-    cleanup()
-    app.quit()
+    console.error("[electron] Server startup failed:", err.message)
+    // Still create window to show error instead of silently quitting
+    createWindow()
+    setupAutoUpdater()
     return
   }
 

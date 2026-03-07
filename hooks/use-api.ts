@@ -20,7 +20,7 @@ function _resolveSSEMessage(data: Record<string, unknown>): string {
     const tKey = keyMap[key]
     if (tKey) {
       const locale = getLocale()
-      let msg = translations[locale]?.[tKey] ?? translations.ko[tKey] ?? tKey
+      let msg: string = translations[locale]?.[tKey] ?? translations.ko[tKey] ?? tKey
       const args = data.message_args as Record<string, unknown> | undefined
       if (args) {
         for (const [k, v] of Object.entries(args)) {

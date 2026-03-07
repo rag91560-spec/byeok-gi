@@ -311,7 +311,7 @@ export default function StringsPage({
   // ---------------------------------------------------------------------------
 
   const handleSaveEntry = async (idx: number, translated: string, status: string) => {
-    await api.strings.update(gameId, idx, { translated, status })
+    await api.strings.update(gameId!, idx, { translated, status })
     // Update local state without full refetch
     setData((prev) => {
       if (!prev) return prev
@@ -352,7 +352,7 @@ export default function StringsPage({
     if (selected.size === 0) return
     setBulkLoading(true)
     try {
-      await api.strings.bulkUpdate(gameId, {
+      await api.strings.bulkUpdate(gameId!, {
         indices: Array.from(selected),
         status,
       })
