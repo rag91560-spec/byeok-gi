@@ -17,3 +17,4 @@ dist-electron/
 dist-electron2/
 build-staging/
 .claude/
+backend/license.py
