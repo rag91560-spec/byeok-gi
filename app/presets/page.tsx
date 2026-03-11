@@ -253,7 +253,7 @@ export default function PresetsPage() {
                   <select
                     value={form.provider}
                     onChange={(e) => setForm({ ...form, provider: e.target.value })}
-                    className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
                   >
                     {PROVIDERS.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
@@ -283,7 +283,7 @@ export default function PresetsPage() {
                   <select
                     value={form.tone}
                     onChange={(e) => setForm({ ...form, tone: e.target.value })}
-                    className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
                   >
                     {TONES.map((tone) => (
                       <option key={tone.id} value={tone.id}>{tone.name}</option>

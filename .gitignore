@@ -8,7 +8,12 @@ __pycache__/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/audio/
 .env
 .env.local
 *.exe
 *.dll
+dist-electron/
+dist-electron2/
+build-staging/
+.claude/

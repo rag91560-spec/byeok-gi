@@ -25,6 +25,16 @@ import type {
   GlossaryTerm,
   GlossarySuggestion,
   ImportResult,
+  MediaFolder,
+  MediaFile,
+  MediaScanResult,
+  ScriptTranslation,
+  VideoItem,
+  AudioItem,
+  MediaCategory,
+  MangaItem,
+  MangaScrapeStatus,
+  MangaTranslationResult,
 } from "./types"
 
 const BASE = "/api"
@@ -403,6 +413,328 @@ export const api = {
     importCsv: (gameId: number, data: FormData) =>
       fetch(`${BASE}/games/${gameId}/project/import/csv`, { method: "POST", body: data })
         .then(r => r.json()) as Promise<ImportResult>,
+  },
+
+  media: {
+    folders: (gameId: number) =>
+      request<{ folders: MediaFolder[] }>(`/media/${gameId}/folders`),
+
+    addFolder: (gameId: number, data: { folder_path: string; media_type: string; label?: string }) =>
+      request<MediaFolder>(`/media/${gameId}/folders`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    removeFolder: (gameId: number, folderId: number) =>
+      request<{ ok: boolean }>(`/media/${gameId}/folders/${folderId}`, {
+        method: "DELETE",
+      }),
+
+    scan: (gameId: number) =>
+      request<MediaScanResult>(`/media/${gameId}/scan`, { method: "POST" }),
+
+    files: (gameId: number, type?: string) =>
+      request<{ files: MediaFile[] }>(`/media/${gameId}/files${type ? `?type=${type}` : ""}`),
+
+    serveUrl: (gameId: number, filePath: string) =>
+      `${BASE}/media/${gameId}/serve?path=${encodeURIComponent(filePath)}`,
+
+    gameIds: (type?: string) =>
+      request<{ game_ids: number[] }>(`/games/media-game-ids${type ? `?type=${type}` : ""}`),
+
+    translateScript: (gameId: number, scriptPath: string, sourceLang?: string, targetLang?: string) =>
+      request<ScriptTranslation>(`/media/${gameId}/script/translate`, {
+        method: "POST",
+        body: JSON.stringify({
+          script_path: scriptPath,
+          source_lang: sourceLang || "ja",
+          target_lang: targetLang || "ko",
+        }),
+      }),
+  },
+
+  live: {
+    ocr: (image: string, language?: string, engine?: string) =>
+      request<{
+        blocks: Array<{ text: string; x: number; y: number; width: number; height: number; confidence: number }>
+        full_text: string
+        language: string
+        engine: string
+        error?: string
+      }>("/live/ocr", {
+        method: "POST",
+        body: JSON.stringify({ image, language: language ?? "ja", engine: engine ?? "auto" }),
+      }),
+
+    translate: (text: string, sourceLang?: string, targetLang?: string, provider?: string, model?: string) =>
+      request<{ translated: string; source_lang: string; target_lang: string; error?: string }>("/live/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          source_lang: sourceLang ?? "ja",
+          target_lang: targetLang ?? "ko",
+          provider: provider ?? "claude",
+          model: model ?? "",
+        }),
+      }),
+
+    translateBlocks: (
+      blocks: Array<{ text: string; x: number; y: number; width: number; height: number }>,
+      sourceLang?: string, targetLang?: string, provider?: string, model?: string,
+    ) =>
+      request<{
+        blocks: Array<{ original: string; translated: string; x: number; y: number; width: number; height: number }>
+        error?: string
+      }>("/live/translate-blocks", {
+        method: "POST",
+        body: JSON.stringify({
+          blocks,
+          source_lang: sourceLang ?? "ja",
+          target_lang: targetLang ?? "ko",
+          provider: provider ?? "claude",
+          model: model ?? "",
+        }),
+      }),
+
+    vision: (image: string, sourceLang?: string, targetLang?: string, provider?: string, model?: string) =>
+      request<{
+        entries: Array<{ original: string; translated: string; x: number; y: number; width: number; height: number }>
+        error?: string
+      }>("/live/vision", {
+        method: "POST",
+        body: JSON.stringify({
+          image,
+          source_lang: sourceLang ?? "ja",
+          target_lang: targetLang ?? "ko",
+          provider: provider ?? "claude",
+          model: model ?? "",
+        }),
+      }),
+
+    cacheStats: () => request<{ size: number; max_size: number }>("/live/cache/stats"),
+    cacheClear: () => request<{ ok: boolean }>("/live/cache/clear", { method: "POST" }),
+
+    wsUrl: () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+      return `${protocol}//${window.location.hostname}:8000/api/live/ws`
+    },
+  },
+
+  videos: {
+    list: () => request<VideoItem[]>("/videos"),
+
+    add: (data: { title: string; type: string; source: string; thumbnail?: string; duration?: number; size?: number; category_id?: number | null }) =>
+      request<VideoItem>("/videos", { method: "POST", body: JSON.stringify(data) }),
+
+    update: (id: number, data: Partial<VideoItem>) =>
+      request<VideoItem>(`/videos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+    delete: (id: number) =>
+      request<{ ok: boolean }>(`/videos/${id}`, { method: "DELETE" }),
+
+    serveUrl: (id: number) => `${BASE}/videos/${id}/serve`,
+
+    addFile: async (file: File): Promise<VideoItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/videos/upload`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    uploadThumbnail: async (id: number, file: File): Promise<VideoItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/videos/${id}/thumbnail`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    bulkMove: (ids: number[], categoryId: number | null) =>
+      request<{ ok: boolean; moved: number }>("/videos/bulk-move", {
+        method: "POST",
+        body: JSON.stringify({ ids, category_id: categoryId }),
+      }),
+  },
+
+  audio: {
+    list: () => request<AudioItem[]>("/audio"),
+
+    add: (data: { title: string; type: string; source: string; thumbnail?: string; duration?: number; size?: number; category_id?: number | null }) =>
+      request<AudioItem>("/audio", { method: "POST", body: JSON.stringify(data) }),
+
+    update: (id: number, data: Partial<AudioItem>) =>
+      request<AudioItem>(`/audio/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+    delete: (id: number) =>
+      request<{ ok: boolean }>(`/audio/${id}`, { method: "DELETE" }),
+
+    serveUrl: (id: number) => `${BASE}/audio/${id}/serve`,
+
+    addFile: async (file: File): Promise<AudioItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/audio/upload`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    uploadThumbnail: async (id: number, file: File): Promise<AudioItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/audio/${id}/thumbnail`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    bulkMove: (ids: number[], categoryId: number | null) =>
+      request<{ ok: boolean; moved: number }>("/audio/bulk-move", {
+        method: "POST",
+        body: JSON.stringify({ ids, category_id: categoryId }),
+      }),
+
+    scanFolder: (path: string, categoryId?: number | null) =>
+      request<AudioItem[]>("/audio/scan-folder", {
+        method: "POST",
+        body: JSON.stringify({ path, category_id: categoryId ?? null }),
+      }),
+
+    uploadScript: async (id: number, file: File): Promise<AudioItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/audio/${id}/script`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    updateScript: (id: number, text: string) =>
+      request<AudioItem>(`/audio/${id}`, { method: "PUT", body: JSON.stringify({ script_text: text }) }),
+
+    translateScript: (id: number, sourceLang = "ja", targetLang = "ko") =>
+      request<{ original: string[]; translated: string[]; total: number; cached: number; item: AudioItem }>(
+        `/audio/${id}/translate-script`,
+        { method: "POST", body: JSON.stringify({ source_lang: sourceLang, target_lang: targetLang }) },
+      ),
+  },
+
+  categories: {
+    list: (mediaType?: string) =>
+      request<MediaCategory[]>(`/categories${mediaType ? `?media_type=${mediaType}` : ""}`),
+
+    create: (data: { name: string; media_type: string; sort_order?: number }) =>
+      request<MediaCategory>("/categories", { method: "POST", body: JSON.stringify(data) }),
+
+    update: (id: number, data: { name?: string; sort_order?: number }) =>
+      request<MediaCategory>(`/categories/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+    delete: (id: number) =>
+      request<{ ok: boolean }>(`/categories/${id}`, { method: "DELETE" }),
+  },
+
+  manga: {
+    list: (search?: string, sourceType?: string) => {
+      const sp = new URLSearchParams()
+      if (search) sp.set("search", search)
+      if (sourceType) sp.set("source_type", sourceType)
+      return request<MangaItem[]>(`/manga?${sp}`)
+    },
+
+    get: (id: number) => request<MangaItem>(`/manga/${id}`),
+
+    scrape: (url: string) =>
+      request<MangaScrapeStatus>("/manga/scrape", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
+
+    scrapeStatus: (url: string) =>
+      request<MangaScrapeStatus>(`/manga/scrape/status?url=${encodeURIComponent(url)}`),
+
+    delete: (id: number) =>
+      request<{ ok: boolean }>(`/manga/${id}`, { method: "DELETE" }),
+
+    imageUrl: (id: number, page: number) => `${BASE}/manga/${id}/images/${page}`,
+
+    thumbnailUrl: (id: number) => `${BASE}/manga/${id}/thumbnail`,
+
+    uploadThumbnail: async (id: number, file: File): Promise<MangaItem> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE}/manga/${id}/thumbnail`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    translate: (id: number, page: number, model?: string) =>
+      request<MangaTranslationResult>(`/manga/${id}/translate`, {
+        method: "POST",
+        body: JSON.stringify({ page, model: model ?? "gemini-2.0-flash" }),
+      }),
+
+    getTranslation: (id: number, page: number) =>
+      request<{ exists: boolean; translation?: MangaTranslationResult["translation"] }>(
+        `/manga/${id}/translation/${page}`
+      ),
+
+    upload: async (title: string, files: File[]): Promise<MangaItem> => {
+      const form = new FormData()
+      form.append("title", title)
+      files.forEach((f) => form.append("files", f))
+      const res = await fetch(`${BASE}/manga/upload`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    addImages: async (id: number, files: File[]): Promise<MangaItem> => {
+      const form = new FormData()
+      files.forEach((f) => form.append("files", f))
+      const res = await fetch(`${BASE}/manga/${id}/images`, { method: "POST", body: form })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const err = await res.json(); msg = err.detail || msg } catch {}
+        throw new Error(msg)
+      }
+      return res.json()
+    },
+
+    reorder: (id: number, order: number[]) =>
+      request<MangaItem>(`/manga/${id}/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ order }),
+      }),
+
+    deleteImage: (id: number, page: number) =>
+      request<{ ok: boolean; page_count: number }>(`/manga/${id}/images/${page}`, {
+        method: "DELETE",
+      }),
   },
 
   health: () => request<{ status: string }>("/health"),

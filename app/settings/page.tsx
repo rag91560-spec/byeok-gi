@@ -91,8 +91,8 @@ export default function SettingsPage() {
 
     try {
       await save({
-        api_keys: JSON.stringify(keys),
-        scan_directories: JSON.stringify(filteredDirs),
+        api_keys: keys,
+        scan_directories: filteredDirs,
         default_provider: defaultProvider,
         default_source_lang: defaultLang,
         license_key: trimmedKey,
@@ -169,7 +169,7 @@ export default function SettingsPage() {
                 </span>
               ) : null}
               <button
-                onClick={() => verifyLicense()}
+                onClick={async () => { await save({ ...settings!, license_key: licenseKey.trim() }); verifyLicense() }}
                 disabled={licenseLoading || !licenseKey}
                 className="text-xs text-accent hover:text-accent/80 disabled:text-text-tertiary disabled:cursor-not-allowed transition-colors"
               >
@@ -189,7 +189,7 @@ export default function SettingsPage() {
               <select
                 value={defaultProvider}
                 onChange={(e) => setDefaultProvider(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
               >
                 {KEY_PROVIDERS.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -205,7 +205,7 @@ export default function SettingsPage() {
               <select
                 value={defaultLang}
                 onChange={(e) => setDefaultLang(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-full h-10 px-3 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
               >
                 <option value="ja">{t("japanese")}</option>
                 <option value="en">{t("english")}</option>

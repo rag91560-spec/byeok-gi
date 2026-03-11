@@ -17,6 +17,8 @@ import {
   MonitorIcon,
   FilterIcon,
   FileTextIcon,
+  MusicIcon,
+  VideoIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -180,7 +182,8 @@ export default function LibraryPage() {
   const [scanResults, setScanResults] = useState<
     Array<{ title: string; path: string; engine: string; exe_path: string; platform?: string; variant_lang?: string }>
   >([])
-  const [platformFilter, setPlatformFilter] = useState<"all" | "windows" | "android">("all")
+  const [platformFilter, setPlatformFilter] = useState<"all" | "windows" | "android" | "audio" | "video">("all")
+  const [mediaGameIds, setMediaGameIds] = useState<{ audio: Set<number>; video: Set<number> }>({ audio: new Set(), video: new Set() })
   const [showApkModal, setShowApkModal] = useState(false)
   const [apkPath, setApkPath] = useState("")
   const [apkLoading, setApkLoading] = useState(false)
@@ -190,6 +193,19 @@ export default function LibraryPage() {
 
   const gamesRef = useRef(games)
   gamesRef.current = games
+
+  // Load media game IDs for filter
+  useEffect(() => {
+    Promise.all([
+      api.media.gameIds("audio"),
+      api.media.gameIds("video"),
+    ]).then(([audioRes, videoRes]) => {
+      setMediaGameIds({
+        audio: new Set(audioRes.game_ids),
+        video: new Set(videoRes.game_ids),
+      })
+    }).catch(() => {})
+  }, [games])
 
   const handleImportSubtitles = useCallback(async () => {
     setSubtitleLoading(true)
@@ -265,7 +281,10 @@ export default function LibraryPage() {
         if (game?.id) {
           api.covers.fetch(game.id).then(() => refresh()).catch((e) => console.error("Cover fetch failed:", e))
         }
-      } catch (e) { console.error("Add scanned game failed:", e) }
+      } catch (e) {
+        console.error("Add scanned game failed:", e)
+        setAddError(e instanceof Error ? e.message : "Failed to add game")
+      }
     },
     [refresh]
   )
@@ -358,10 +377,17 @@ export default function LibraryPage() {
   }, [apkResults, refresh])
 
   // Platform filter + categorize games
-  const filteredGames = platformFilter === "all" ? games : games.filter(g => (g.platform || "windows") === platformFilter)
+  const filteredGames = platformFilter === "all"
+    ? games
+    : platformFilter === "audio"
+      ? games.filter(g => mediaGameIds.audio.has(g.id))
+      : platformFilter === "video"
+        ? games.filter(g => mediaGameIds.video.has(g.id))
+        : games.filter(g => (g.platform || "windows") === platformFilter)
   const translatedGames = filteredGames.filter(g => g.translated_count > 0 || g.status === "applied" || g.status === "translated")
   const untranslatedGames = filteredGames.filter(g => g.translated_count === 0 && g.status !== "applied" && g.status !== "translated")
   const hasAndroid = games.some(g => g.platform === "android")
+  const hasMedia = mediaGameIds.audio.size > 0 || mediaGameIds.video.size > 0
 
   return (
     <div className="p-5 md:p-6 max-w-6xl mx-auto">
@@ -578,25 +604,33 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {/* Platform Filter */}
-      {hasAndroid && (
+      {/* Platform / Media Filter */}
+      {(hasAndroid || hasMedia) && (
         <div className="flex items-center gap-1.5 mb-4">
           <FilterIcon className="size-3.5 text-text-tertiary" />
-          {(["all", "windows", "android"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPlatformFilter(p)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all border ${
-                platformFilter === p
-                  ? "bg-accent-muted text-accent border-accent/30"
-                  : "bg-overlay-2 text-text-secondary border-transparent hover:bg-overlay-4"
-              }`}
-            >
-              {p === "all" && t("platformAll")}
-              {p === "windows" && <><MonitorIcon className="size-3 inline mr-1" />{t("platformWindows")}</>}
-              {p === "android" && <><SmartphoneIcon className="size-3 inline mr-1" />{t("platformAndroid")}</>}
-            </button>
-          ))}
+          {(["all", "windows", "android", "audio", "video"] as const).map((p) => {
+            // Hide filter buttons that have no matching games
+            if (p === "android" && !hasAndroid) return null
+            if (p === "audio" && mediaGameIds.audio.size === 0) return null
+            if (p === "video" && mediaGameIds.video.size === 0) return null
+            return (
+              <button
+                key={p}
+                onClick={() => setPlatformFilter(p)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all border ${
+                  platformFilter === p
+                    ? "bg-accent-muted text-accent border-accent/30"
+                    : "bg-overlay-2 text-text-secondary border-transparent hover:bg-overlay-4"
+                }`}
+              >
+                {p === "all" && t("platformAll")}
+                {p === "windows" && <><MonitorIcon className="size-3 inline mr-1" />{t("platformWindows")}</>}
+                {p === "android" && <><SmartphoneIcon className="size-3 inline mr-1" />{t("platformAndroid")}</>}
+                {p === "audio" && <><MusicIcon className="size-3 inline mr-1" />{t("platformAudio")}</>}
+                {p === "video" && <><VideoIcon className="size-3 inline mr-1" />{t("platformVideo")}</>}
+              </button>
+            )
+          })}
         </div>
       )}
 

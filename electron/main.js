@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron")
+const { app, BrowserWindow, shell, ipcMain, dialog, desktopCapturer, globalShortcut, screen } = require("electron")
 const path = require("path")
 const { spawn, fork } = require("child_process")
 const http = require("http")
@@ -13,6 +13,10 @@ let mainWindow = null
 let backendProcess = null
 let frontendProcess = null
 const gameWindows = new Map() // gameId -> BrowserWindow
+let overlayWindow = null
+let regionSelectWindow = null
+let autoCaptureInterval = null
+let trackingWindowId = null
 
 // ── Helpers ──
 
@@ -98,8 +102,35 @@ async function startBackend() {
     )
   } else {
     // Production: run PyInstaller-built backend.exe
+    // Use userData for persistent data (survives app updates)
     const backendExe = path.join(process.resourcesPath, "backend-dist", "backend.exe")
-    const dataDir = path.join(process.resourcesPath, "data")
+    const dataDir = path.join(app.getPath("userData"), "data")
+    const fs = require("fs")
+    fs.mkdirSync(dataDir, { recursive: true })
+
+    // One-time migration: copy data from old resources/data/ if userData/data/ is empty
+    const oldDataDir = path.join(process.resourcesPath, "data")
+    const userDb = path.join(dataDir, "library.db")
+    if (!fs.existsSync(userDb) && fs.existsSync(path.join(oldDataDir, "library.db"))) {
+      console.log("[electron] Migrating data from resources/ to userData/...")
+      try {
+        const copyRecursive = (src, dest) => {
+          if (fs.statSync(src).isDirectory()) {
+            fs.mkdirSync(dest, { recursive: true })
+            for (const item of fs.readdirSync(src)) {
+              copyRecursive(path.join(src, item), path.join(dest, item))
+            }
+          } else {
+            fs.copyFileSync(src, dest)
+          }
+        }
+        copyRecursive(oldDataDir, dataDir)
+        console.log("[electron] Data migration complete.")
+      } catch (err) {
+        console.error("[electron] Data migration failed:", err)
+      }
+    }
+
     backendProcess = spawn(
       backendExe,
       [
@@ -115,7 +146,26 @@ async function startBackend() {
   }
   backendProcess.stdout?.on("data", (d) => process.stdout.write(`[backend] ${d}`))
   backendProcess.stderr?.on("data", (d) => process.stderr.write(`[backend] ${d}`))
-  backendProcess.on("error", (err) => console.error("[backend] Error:", err))
+  backendProcess.on("error", (err) => {
+    console.error("[backend] Spawn error:", err)
+    if (!isDev) {
+      dialog.showErrorBox(
+        "Backend Error",
+        `백엔드 실행 실패: ${err.message}\n\nWindows Defender나 백신이 backend.exe를 차단했을 수 있습니다.\n앱 폴더를 백신 예외에 추가해주세요.`
+      )
+    }
+  })
+  backendProcess.on("exit", (code, signal) => {
+    if (code !== null && code !== 0) {
+      console.error(`[backend] Exited with code ${code}`)
+      if (!isDev) {
+        dialog.showErrorBox(
+          "Backend Crashed",
+          `백엔드가 비정상 종료되었습니다 (코드: ${code}).\n앱을 재시작해주세요.`
+        )
+      }
+    }
+  })
 }
 
 async function startFrontend() {
@@ -156,6 +206,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#0c0c0f",
+    icon: path.join(__dirname, "..", "build", "icon.png"),
     show: false,
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -256,6 +307,9 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null
+    // Main window closed = user wants to quit. Force cleanup and exit.
+    cleanup()
+    app.quit()
   })
 }
 
@@ -351,6 +405,24 @@ ipcMain.handle("select-subtitle-files", async () => {
   return result.filePaths
 })
 
+// Video file dialogs
+ipcMain.handle("select-video-files", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select video files",
+    filters: [{ name: "Video", extensions: ["mp4", "mkv", "webm", "avi", "mov"] }],
+    properties: ["openFile", "multiSelections"],
+  })
+  return result.filePaths
+})
+
+ipcMain.handle("select-video-folder", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select folder containing video files",
+    properties: ["openDirectory"],
+  })
+  return result.filePaths[0] || ""
+})
+
 // HTML game window
 ipcMain.handle("open-html-game", (event, { gameId, title, serveUrl }) => {
   const existing = gameWindows.get(gameId)
@@ -401,6 +473,235 @@ ipcMain.handle("close-html-game", (event, { gameId }) => {
   gameWindows.delete(gameId)
 })
 
+// ── Live Translation IPC ──
+
+// List available capture sources (windows/screens)
+ipcMain.handle("live:list-sources", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["window", "screen"],
+    thumbnailSize: { width: 320, height: 180 },
+    fetchWindowIcons: true,
+  })
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnail: s.thumbnail.toDataURL(),
+    icon: s.appIcon ? s.appIcon.toDataURL() : null,
+    isScreen: s.id.startsWith("screen:"),
+  }))
+})
+
+// Capture a specific source and return base64 image
+ipcMain.handle("live:capture-screen", async (event, { sourceId, region }) => {
+  const sources = await desktopCapturer.getSources({
+    types: ["window", "screen"],
+    thumbnailSize: { width: 1920, height: 1080 },
+  })
+  const source = sources.find((s) => s.id === sourceId)
+  if (!source) return { error: "Source not found" }
+
+  let image = source.thumbnail
+  if (region && region.x != null) {
+    image = image.crop({
+      x: Math.round(region.x),
+      y: Math.round(region.y),
+      width: Math.round(region.width),
+      height: Math.round(region.height),
+    })
+  }
+  return { image: image.toPNG().toString("base64") }
+})
+
+// Overlay window management
+ipcMain.handle("live:show-overlay", (event, { bounds }) => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.show()
+    if (bounds) overlayWindow.setBounds(bounds)
+    return
+  }
+
+  // Default: full primary display (transparent except for text blocks)
+  const display = screen.getPrimaryDisplay()
+  const overlayBounds = bounds || {
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+  }
+
+  overlayWindow = new BrowserWindow({
+    ...overlayBounds,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    movable: true,
+    focusable: false,
+    hasShadow: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+
+  // Windows: setIgnoreMouseEvents(true) makes all clicks pass through
+  overlayWindow.setIgnoreMouseEvents(true)
+  overlayWindow.loadURL(`http://localhost:${FRONTEND_PORT}/overlay`)
+
+  // Inject transparent background override (ensure no white flash)
+  overlayWindow.webContents.on("did-finish-load", () => {
+    overlayWindow.webContents.insertCSS(`
+      html, body { background: transparent !important; margin: 0; padding: 0; overflow: hidden; }
+    `)
+  })
+
+  overlayWindow.on("closed", () => { overlayWindow = null })
+})
+
+ipcMain.handle("live:hide-overlay", () => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.hide()
+  }
+})
+
+ipcMain.handle("live:update-overlay", (event, { data }) => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("live:overlay-data", data)
+  }
+})
+
+ipcMain.handle("live:set-overlay-bounds", (event, bounds) => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.setBounds(bounds)
+  }
+})
+
+// Region selection window
+ipcMain.handle("live:select-region", async () => {
+  return new Promise((resolve) => {
+    if (regionSelectWindow && !regionSelectWindow.isDestroyed()) {
+      regionSelectWindow.focus()
+      return resolve(null)
+    }
+
+    const display = screen.getPrimaryDisplay()
+    regionSelectWindow = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      fullscreen: true,
+      skipTaskbar: true,
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    })
+
+    regionSelectWindow.loadURL(`http://localhost:${FRONTEND_PORT}/region-select`)
+
+    ipcMain.once("live:region-selected", (e, region) => {
+      if (regionSelectWindow && !regionSelectWindow.isDestroyed()) {
+        regionSelectWindow.close()
+      }
+      regionSelectWindow = null
+      resolve(region)
+    })
+
+    regionSelectWindow.on("closed", () => {
+      regionSelectWindow = null
+      resolve(null)
+    })
+  })
+})
+
+ipcMain.handle("live:confirm-region", (event, region) => {
+  ipcMain.emit("live:region-selected", event, region)
+})
+
+// Window tracking (for overlay sync when game window moves)
+ipcMain.handle("live:track-window", (event, { sourceId }) => {
+  trackingWindowId = sourceId
+})
+
+ipcMain.handle("live:get-window-bounds", async (event, { sourceId }) => {
+  // desktopCapturer doesn't provide window bounds directly;
+  // we use a lightweight re-capture to track position changes
+  const sources = await desktopCapturer.getSources({
+    types: ["window"],
+    thumbnailSize: { width: 1, height: 1 },
+  })
+  const source = sources.find((s) => s.id === sourceId)
+  return source ? { found: true, name: source.name } : { found: false }
+})
+
+// Auto capture control
+ipcMain.handle("live:start-auto-capture", (event, { sourceId, intervalMs, region }) => {
+  if (autoCaptureInterval) clearInterval(autoCaptureInterval)
+
+  autoCaptureInterval = setInterval(async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ["window", "screen"],
+        thumbnailSize: { width: 1920, height: 1080 },
+      })
+      const source = sources.find((s) => s.id === sourceId)
+      if (!source) return
+
+      let image = source.thumbnail
+      if (region && region.x != null) {
+        image = image.crop({
+          x: Math.round(region.x),
+          y: Math.round(region.y),
+          width: Math.round(region.width),
+          height: Math.round(region.height),
+        })
+      }
+
+      const b64 = image.toPNG().toString("base64")
+      mainWindow?.webContents.send("live:auto-capture-frame", { image: b64 })
+    } catch (err) {
+      console.error("[live] Auto capture error:", err.message)
+    }
+  }, intervalMs || 2000)
+})
+
+ipcMain.handle("live:stop-auto-capture", () => {
+  if (autoCaptureInterval) {
+    clearInterval(autoCaptureInterval)
+    autoCaptureInterval = null
+  }
+})
+
+// Global hotkeys for live translation
+ipcMain.handle("live:register-hotkeys", () => {
+  // Ctrl+Shift+T: Toggle live translation capture
+  globalShortcut.register("CommandOrControl+Shift+T", () => {
+    mainWindow?.webContents.send("live:hotkey-capture")
+  })
+  // Ctrl+Shift+O: Toggle overlay
+  globalShortcut.register("CommandOrControl+Shift+O", () => {
+    mainWindow?.webContents.send("live:hotkey-overlay")
+  })
+  // Ctrl+Shift+R: Select region
+  globalShortcut.register("CommandOrControl+Shift+R", () => {
+    mainWindow?.webContents.send("live:hotkey-region")
+  })
+})
+
+ipcMain.handle("live:unregister-hotkeys", () => {
+  globalShortcut.unregister("CommandOrControl+Shift+T")
+  globalShortcut.unregister("CommandOrControl+Shift+O")
+  globalShortcut.unregister("CommandOrControl+Shift+R")
+})
+
 // ── App Lifecycle ──
 
 function cleanup() {
@@ -409,6 +710,21 @@ function cleanup() {
     if (!win.isDestroyed()) win.close()
   }
   gameWindows.clear()
+
+  // Close overlay and region select windows
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
+  if (regionSelectWindow && !regionSelectWindow.isDestroyed()) regionSelectWindow.close()
+  overlayWindow = null
+  regionSelectWindow = null
+
+  // Stop auto capture
+  if (autoCaptureInterval) {
+    clearInterval(autoCaptureInterval)
+    autoCaptureInterval = null
+  }
+
+  // Unregister hotkeys
+  globalShortcut.unregisterAll()
 
   killProcess(backendProcess)
   killProcess(frontendProcess)

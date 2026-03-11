@@ -1,7 +1,11 @@
 {
   "name": "game-translator",
-  "version": "1.2.0",
-  "private": true,
+  "version": "1.2.5",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rag91560-spec/byeok-gi.git"
+  },
   "main": "electron/main.js",
   "scripts": {
     "dev": "next dev --port 3100",
@@ -40,8 +44,9 @@
   },
   "build": {
     "appId": "com.gametranslator.app",
-    "productName": "게임번역기",
+    "productName": "번@역+기!",
     "asar": true,
+    "afterPack": "./scripts/afterPack.js",
     "directories": {
       "output": "dist-electron"
     },
@@ -52,7 +57,8 @@
     "extraResources": [
       {
         "from": "build-staging/frontend",
-        "to": "frontend"
+        "to": "frontend",
+        "filter": ["**/*"]
       },
       {
         "from": "dist/backend-dist",
@@ -62,16 +68,22 @@
         "from": "data",
         "to": "data",
         "filter": [
-          "**/*"
+          "**/*",
+          "!*.db",
+          "!*.db-shm",
+          "!*.db-wal"
         ]
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "publish": {
       "provider": "generic",

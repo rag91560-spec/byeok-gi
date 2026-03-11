@@ -1,36 +1,25 @@
-# Game Translator (게임번역기 런처)
+# Game Translator v1.2.5
 
-## Stack
-- Next.js 16 (App Router) + React 19 + TypeScript
-- Tailwind CSS v4 (inline theme, CSS Variables)
-- Electron 35 (desktop wrapper)
-- Python FastAPI backend (port 8000)
+Next.js 16 + React 19 + TS5 + Tailwind v4 + Electron 35 + Python FastAPI(:8000). 상세 → `ARCHITECTURE.md`
 
-## Architecture
-- `app/` — Next.js pages (App Router, `"use client"` 필수)
-- `components/ui/` — CVA 기반 재사용 컴포넌트 (button, card, glow-border)
-- `hooks/` — 커스텀 훅 (use-api, use-locale, use-theme)
-- `lib/api.ts` — 백엔드 래퍼 (`/api/*` → localhost:8000 프록시)
-- `backend/` — Python FastAPI (server.py, routers/, db.py)
-- `electron/` — Electron main process (main.js, preload.js)
+## 구조
+`app/` pages | `components/ui/` CVA | `components/game-detail/` 도메인 | `hooks/` (use-api, use-locale, use-theme) | `lib/` (api.ts, types.ts, i18n.ts) | `backend/` FastAPI (routers/ 11개) | `electron/` (main.js, preload.js)
 
-## Conventions
-- 스타일링: CSS Variables + Tailwind utility. `cn()` 유틸 사용
-- 상태: 커스텀 훅 (useState/useEffect). Redux/Zustand 없음
-- 컴포넌트: CVA variants (`buttonVariants.cva()`)
-- API: `api.games.scan()`, `api.translate.start()` 패턴
-- i18n: `use-locale.ts` 훅 (한국어 기본, 영어 폴백)
-- 테마: dark 기본, `.light` 클래스로 전환
+## 컨벤션
+- CSS Variables(`--background`, `--foreground`, `--accent`, `--card`, `--border`, `--radius`) + Tailwind. `cn()` 유틸. 색상 하드코딩 금지
+- 상태: 커스텀 훅. Redux/Zustand 없음 | 컴포넌트: CVA variants | API: `api.games.scan()` 패턴
+- i18n: `use-locale.ts` (ko 기본, en 폴백) | 테마: dark 기본, system 감지
+- 커밋: `feat:/fix:/refactor:/ui:/backend:/build:` + 변경 이유
 
-## Commands
+## 명령어
 ```bash
-npm run dev          # Next.js dev
-npm run build        # Production build
-npm run electron:build  # Electron + NSIS installer
+npm run dev / build / lint / electron:dev / electron:build / electron:pack
 ```
 
-## Rules
-- 새 페이지: `app/<name>/page.tsx` + `"use client"` 상단 필수
-- 새 UI 컴포넌트: `components/ui/` 에 CVA 패턴으로
-- API 추가: `lib/api.ts`에 메서드 추가 + `backend/routers/`에 엔드포인트
-- 시크릿 하드코딩 절대 금지 — 환경변수 사용
+## 규칙
+- 새 페이지: `app/<name>/page.tsx` + `"use client"` 필수
+- 새 UI: `components/ui/` CVA 패턴 | 도메인: `components/<domain>/`
+- API 추가: `lib/api.ts` 메서드 + `backend/routers/` 엔드포인트 + `lib/types.ts` 타입
+- 에러: API catch → toast. 라이선스 만료 → Paywall
+- 커밋 전 `npm run lint && npm run build` 통과 필수
+- 시크릿 하드코딩 금지

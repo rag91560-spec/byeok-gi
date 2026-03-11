@@ -59,7 +59,7 @@ export default function TranslatePage() {
                   e.target.value ? parseInt(e.target.value) : null,
                 )
               }
-              className="w-full h-12 px-3 pr-10 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all"
+              className="w-full h-12 px-3 pr-10 rounded-lg border border-border bg-surface-elevated text-text-primary text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all [&>option]:bg-[#1a1a2e] [&>option]:text-white"
             >
               <option value="">{t("selectFromLibrary")}</option>
               {games.map((g) => (

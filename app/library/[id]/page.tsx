@@ -150,9 +150,13 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [gameId, game?.title, router])
 
+  const [startingTranslation, setStartingTranslation] = useState(false)
+
   const handleTranslateStart = useCallback(async (opts: { provider: string; model?: string; presetId?: number }) => {
     if (gameId === null) return
     reset()
+    setStartingTranslation(true)
+    setActionError("")
     try {
       await api.translate.start(gameId, {
         provider: opts.provider,
@@ -164,6 +168,8 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
     } catch (e) {
       const msg = e instanceof Error ? e.message : t("translationStartFailed")
       setActionError(msg)
+    } finally {
+      setStartingTranslation(false)
     }
   }, [gameId, game, connect, reset, t])
 
@@ -227,7 +233,7 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
 
   const pct = getProgressPct(game)
   const { text: statusText, color: statusColor } = getStatusInfo(game, t)
-  const isTranslating = txStatus === "running" || txStatus === "connecting"
+  const isTranslating = startingTranslation || txStatus === "running" || txStatus === "connecting"
 
   return (
     <div className="max-w-4xl mx-auto pb-8">
@@ -350,7 +356,9 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
                 <div className="h-full bg-accent rounded-full transition-all duration-300" style={{ width: `${progress.progress}%` }} />
               </div>
               <div className="flex items-center justify-between mt-2">
-                <p className="text-xs text-text-tertiary">{txMessage || t("translating")}</p>
+                <p className="text-xs text-text-tertiary">
+                  {startingTranslation ? t("preparingTranslation") : txMessage || t("translating")}
+                </p>
                 <p className="text-xs text-text-secondary font-mono">{progress.translated}/{progress.total}</p>
               </div>
             </CardContent>

@@ -186,9 +186,14 @@ export default function ModelsPage() {
     <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary tracking-tight">
-            {t("models")}
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-text-primary tracking-tight">
+              {t("models")}
+            </h1>
+            <span className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-warning/15 text-warning border border-warning/25 tracking-wide">
+              개발 예정
+            </span>
+          </div>
           <p className="text-sm text-text-secondary mt-1">
             {t("modelsDescription")}
           </p>
