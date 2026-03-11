@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, use } from "react"
+import { useState, useEffect, useCallback, useRef, use } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeftIcon,
@@ -10,19 +10,21 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Loader2Icon,
-  FilterIcon,
   AlertTriangleIcon,
   PencilIcon,
   XIcon,
   CheckIcon,
+  PlayIcon,
+  SquareIcon,
+  RefreshCwIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Paywall } from "@/components/ui/paywall"
 import { useLocale } from "@/hooks/use-locale"
-import { useLicenseStatus } from "@/hooks/use-api"
+import { useLicenseStatus, useTranslationProgress, useGame, useSettings } from "@/hooks/use-api"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { TranslationEntry, TranslationStringsResponse } from "@/lib/types"
+import type { TranslateRequest, TranslationEntry, TranslationStringsResponse } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,11 +93,15 @@ function StringRow({
   onSave,
   isSelected,
   onToggleSelect,
+  isTranslating,
+  rowRef,
 }: {
   entry: EntryWithIndex
   onSave: (idx: number, translated: string, status: string) => Promise<void>
   isSelected: boolean
   onToggleSelect: (idx: number) => void
+  isTranslating: boolean
+  rowRef?: React.Ref<HTMLTableRowElement>
 }) {
   const { t } = useLocale()
   const [editing, setEditing] = useState(false)
@@ -134,9 +140,11 @@ function StringRow({
 
   return (
     <tr
+      ref={rowRef}
       className={cn(
-        "border-b border-overlay-4 hover:bg-overlay-2 transition-colors duration-100",
-        isSelected && "bg-accent/5"
+        "border-b border-overlay-4 hover:bg-overlay-2 transition-colors duration-200",
+        isSelected && "bg-accent/5",
+        isTranslating && "bg-warning/8 ring-1 ring-warning/30 ring-inset"
       )}
     >
       {/* Checkbox */}
@@ -151,6 +159,7 @@ function StringRow({
 
       {/* # */}
       <td className="px-2 py-3 text-xs text-text-tertiary w-12 text-right">
+        {isTranslating && <Loader2Icon className="size-3 animate-spin text-warning inline mr-1" />}
         {entry._index + 1}
       </td>
 
@@ -255,6 +264,8 @@ export default function StringsPage({
   const router = useRouter()
   const { t } = useLocale()
   const { license, refresh: refreshLicense } = useLicenseStatus()
+  const { game } = useGame(gameId)
+  const { settings } = useSettings()
 
   // State
   const [data, setData] = useState<TranslationStringsResponse | null>(null)
@@ -269,8 +280,42 @@ export default function StringsPage({
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [translateLoading, setTranslateLoading] = useState(false)
 
   const PER_PAGE = 50
+
+  // Translation progress (SSE)
+  const {
+    progress: translationProgress,
+    status: translationStatus,
+    message: translationMessage,
+    connect: connectSSE,
+    disconnect: disconnectSSE,
+    reset: resetSSE,
+  } = useTranslationProgress(gameId)
+
+  const isTranslating = translationStatus === "running" || translationStatus === "connecting"
+  const currentIndex = translationProgress.current_index
+
+  // Ref map for auto-scrolling to current row
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map())
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to current translating row
+  useEffect(() => {
+    if (currentIndex == null) return
+    const row = rowRefs.current.get(currentIndex)
+    if (row) {
+      row.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+  }, [currentIndex])
+
+  // Refetch strings when translation completes
+  useEffect(() => {
+    if (translationStatus === "completed") {
+      fetchStrings()
+    }
+  }, [translationStatus])
 
   // ---------------------------------------------------------------------------
   // Fetch
@@ -307,12 +352,61 @@ export default function StringsPage({
   }, [statusFilter, search, qaOnly])
 
   // ---------------------------------------------------------------------------
+  // Translation controls
+  // ---------------------------------------------------------------------------
+
+  const startTranslation = async (mode: "all" | "selected" | "retranslate") => {
+    if (gameId === null || !game) return
+    setTranslateLoading(true)
+    try {
+      const provider = (settings.default_provider as string) || "claude"
+
+      const req: TranslateRequest = {
+        provider,
+        source_lang: game.source_lang || "auto",
+        preset_id: game.preset_id ?? undefined,
+      }
+
+      if (mode === "selected" && selected.size > 0) {
+        const indices = Array.from(selected).sort((a, b) => a - b)
+        req.start_index = indices[0]
+        req.end_index = indices[indices.length - 1] + 1
+      } else if (mode === "retranslate") {
+        // Reset translated entries to pending first, then translate all
+        const translatedEntries = entries.filter((e) => e.status === "translated")
+        if (translatedEntries.length > 0) {
+          await api.strings.bulkUpdate(gameId, {
+            indices: translatedEntries.map((e) => e._index),
+            status: "pending",
+          })
+          await fetchStrings()
+        }
+      }
+
+      await api.translate.start(gameId, req)
+      connectSSE()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Translation failed")
+    } finally {
+      setTranslateLoading(false)
+    }
+  }
+
+  const cancelTranslation = async () => {
+    if (gameId === null) return
+    try {
+      await api.translate.cancel(gameId)
+    } catch {
+      // ignore
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
 
   const handleSaveEntry = async (idx: number, translated: string, status: string) => {
     await api.strings.update(gameId!, idx, { translated, status })
-    // Update local state without full refetch
     setData((prev) => {
       if (!prev) return prev
       return {
@@ -369,6 +463,15 @@ export default function StringsPage({
   }
 
   // ---------------------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------------------
+
+  const totalStrings = game?.string_count ?? data?.total ?? 0
+  const translatedCount = game?.translated_count ?? 0
+  const pendingCount = totalStrings - translatedCount
+  const progressPercent = totalStrings > 0 ? Math.round((translatedCount / totalStrings) * 100) : 0
+
+  // ---------------------------------------------------------------------------
   // Pagination
   // ---------------------------------------------------------------------------
 
@@ -403,7 +506,7 @@ export default function StringsPage({
         </div>
 
         {/* Bulk actions */}
-        {selected.size > 0 && (
+        {selected.size > 0 && !isTranslating && (
           <div className="flex items-center gap-2 mr-2">
             <span className="text-sm text-text-secondary">{t("selectedItems").replace("{count}", String(selected.size))}</span>
             <Button
@@ -427,6 +530,103 @@ export default function StringsPage({
           </div>
         )}
       </div>
+
+      {/* Translation control bar */}
+      <div className="px-6 py-2.5 border-b border-overlay-4 bg-surface/80 flex flex-wrap items-center gap-2">
+        {isTranslating ? (
+          <>
+            {/* Progress bar */}
+            <div className="flex-1 flex items-center gap-3">
+              <div className="flex-1 max-w-md">
+                <div className="h-2 rounded-full bg-overlay-6 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all duration-300"
+                    style={{ width: `${translationProgress.progress}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-xs text-text-secondary whitespace-nowrap">
+                {translationProgress.translated}/{translationProgress.total} ({Math.round(translationProgress.progress)}%)
+              </span>
+              {translationMessage && (
+                <span className="text-xs text-text-tertiary truncate max-w-[200px]">{translationMessage}</span>
+              )}
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={cancelTranslation}
+            >
+              <SquareIcon className="size-3.5" />
+              {t("cancelTranslation")}
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* Translation action buttons */}
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={translateLoading}
+              disabled={translateLoading}
+              onClick={() => startTranslation("all")}
+            >
+              <PlayIcon className="size-3.5" />
+              {t("translateAll")}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={translateLoading}
+              disabled={translateLoading || selected.size === 0}
+              onClick={() => startTranslation("selected")}
+            >
+              <CheckCircleIcon className="size-3.5" />
+              {t("translateSelected")}
+              {selected.size > 0 && (
+                <span className="text-xs bg-accent/20 text-accent rounded px-1 ml-0.5">{selected.size}</span>
+              )}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={translateLoading}
+              disabled={translateLoading}
+              onClick={() => startTranslation("retranslate")}
+            >
+              <RefreshCwIcon className="size-3.5" />
+              {t("retranslate")}
+            </Button>
+
+            <div className="w-px h-5 bg-overlay-6 mx-1" />
+
+            {/* Stats */}
+            <div className="flex items-center gap-3 text-xs text-text-secondary">
+              <span>{t("totalStrings")}: <strong className="text-text-primary">{totalStrings.toLocaleString()}</strong></span>
+              <span className="text-success">{t("translated")}: <strong>{translatedCount.toLocaleString()}</strong></span>
+              <span className="text-text-tertiary">{t("pending")}: <strong>{pendingCount.toLocaleString()}</strong></span>
+              <span className="text-accent">{progressPercent}%</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Current translating indicator */}
+      {isTranslating && translationProgress.current_original && (
+        <div className="px-6 py-2 border-b border-warning/20 bg-warning/5 flex items-center gap-2">
+          <Loader2Icon className="size-3.5 animate-spin text-warning shrink-0" />
+          <span className="text-xs text-warning font-medium">{t("currentlyTranslating")}:</span>
+          <span className="text-xs text-text-secondary truncate">{translationProgress.current_original}</span>
+          {translationProgress.current_translated && (
+            <>
+              <span className="text-xs text-text-tertiary">→</span>
+              <span className="text-xs text-text-primary truncate">{translationProgress.current_translated}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="px-6 py-3 border-b border-overlay-4 bg-surface flex flex-wrap items-center gap-3">
@@ -477,7 +677,7 @@ export default function StringsPage({
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" ref={tableContainerRef}>
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <Loader2Icon className="size-7 animate-spin text-accent" />
@@ -523,6 +723,11 @@ export default function StringsPage({
                   onSave={handleSaveEntry}
                   isSelected={selected.has(entry._index)}
                   onToggleSelect={handleToggleSelect}
+                  isTranslating={currentIndex === entry._index}
+                  rowRef={(el) => {
+                    if (el) rowRefs.current.set(entry._index, el)
+                    else rowRefs.current.delete(entry._index)
+                  }}
                 />
               ))}
             </tbody>

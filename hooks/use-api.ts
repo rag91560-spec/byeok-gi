@@ -198,7 +198,16 @@ export function useTranslationProgress(gameId: number | null) {
         const data = JSON.parse(e.data)
         if (data && typeof data.progress === "number") {
           retryCountRef.current = 0
-          setProgress(data)
+          setProgress({
+            progress: data.progress,
+            translated: data.translated,
+            total: data.total,
+            status: data.status,
+            message: data.message,
+            current_index: data.current_index,
+            current_original: data.current_original,
+            current_translated: data.current_translated,
+          })
           setStatus(data.status || "running")
           const msg = _resolveSSEMessage(data)
           if (msg) setMessage(msg)

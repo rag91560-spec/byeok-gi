@@ -191,7 +191,7 @@ export default function MemoryPage() {
         <select
           value={searchLang}
           onChange={(e) => setSearchLang(e.target.value)}
-          className="h-11 px-3 rounded-lg border border-border bg-surface text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50"
+          className="h-11 px-3 rounded-lg border border-border bg-surface text-text-primary text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
         >
           <option value="">{t("allLanguages")}</option>
           <option value="ja">{t("japanese")}</option>

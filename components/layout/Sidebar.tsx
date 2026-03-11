@@ -16,6 +16,12 @@ import {
   DatabaseIcon,
   ShieldCheckIcon,
   DownloadIcon,
+  ScanEyeIcon,
+  PlayCircleIcon,
+  BookOpenIcon,
+  ChevronDownIcon,
+  Gamepad2Icon,
+  MusicIcon,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -31,14 +37,24 @@ interface NavItem {
   readonly href: string
   readonly icon: React.ComponentType<{ className?: string }>
   readonly group?: string
+  readonly badge?: string
 }
 
+const LIBRARY_SUB_ITEMS: readonly NavItem[] = [
+  { labelKey: "games", href: "/library", icon: Gamepad2Icon },
+  { labelKey: "videos", href: "/videos", icon: PlayCircleIcon },
+  { labelKey: "audio", href: "/audio", icon: MusicIcon },
+  { labelKey: "manga", href: "/manga", icon: BookOpenIcon },
+]
+
+const LIBRARY_PATHS = LIBRARY_SUB_ITEMS.map(i => i.href)
+
 const NAV_ITEMS: readonly NavItem[] = [
-  { labelKey: "library", href: "/library", icon: LibraryIcon },
   { labelKey: "translate", href: "/translate", icon: LanguagesIcon },
+  { labelKey: "liveTranslation", href: "/live", icon: ScanEyeIcon },
   { labelKey: "presets", href: "/presets", icon: SlidersHorizontalIcon, group: "tools" },
   { labelKey: "translationMemory", href: "/memory", icon: DatabaseIcon, group: "tools" },
-  { labelKey: "models", href: "/models", icon: BrainCircuitIcon, group: "tools" },
+  { labelKey: "models", href: "/models", icon: BrainCircuitIcon, group: "tools", badge: "예정" },
   { labelKey: "settings", href: "/settings", icon: SettingsIcon, group: "system" },
   { labelKey: "download", href: "/download", icon: DownloadIcon, group: "system" },
   { labelKey: "admin", href: "/admin", icon: ShieldCheckIcon, group: "system" },
@@ -123,6 +139,13 @@ export function Sidebar() {
   const { theme, setTheme } = useTheme()
   const [isElectron, setIsElectron] = React.useState(false)
   const sdkProgress = useSdkAutoSetup()
+  const isLibraryPath = LIBRARY_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))
+  const [libraryOpen, setLibraryOpen] = React.useState(true)
+
+  // Auto-expand when navigating to a library path
+  React.useEffect(() => {
+    if (isLibraryPath) setLibraryOpen(true)
+  }, [isLibraryPath])
 
   React.useEffect(() => {
     if (window.electronAPI?.isElectron) {
@@ -169,6 +192,11 @@ export function Sidebar() {
       >
         <Icon className={cn("size-[18px] shrink-0", isActive ? "text-accent" : "text-inherit")} />
         <span className="hidden md:inline">{t(item.labelKey)}</span>
+        {item.badge && (
+          <span className="hidden md:inline ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-warning/15 text-warning border border-warning/25">
+            {item.badge}
+          </span>
+        )}
       </Link>
     )
   }
@@ -188,15 +216,75 @@ export function Sidebar() {
         <Link href="/" className="flex items-center gap-2.5">
           <TranslatorLogo className="text-accent shrink-0" />
           <span className="hidden md:inline text-sm font-bold text-text-primary tracking-tight">
-            {t("appName")}
+            번<span className="text-accent">@</span>역<span className="text-accent">+</span>기<span className="text-accent">!</span>
           </span>
         </Link>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto pt-3 pb-2" aria-label="Main navigation">
-        {/* Main */}
+        {/* Library collapsible group */}
         <div className="px-1.5 md:px-2.5 space-y-0.5">
+          {/* Mobile: icon-only link to /library */}
+          <Link
+            href="/library"
+            title={t("library")}
+            className={cn(
+              "flex items-center justify-center rounded-lg text-[13px] transition-all duration-150 md:hidden",
+              "px-0 py-2.5",
+              isLibraryPath
+                ? "text-foreground font-medium bg-accent-muted shadow-[inset_0_0_0_1px_var(--accent-muted)]"
+                : "text-text-secondary hover:text-text-primary hover:bg-overlay-4"
+            )}
+          >
+            <LibraryIcon className={cn("size-[18px] shrink-0", isLibraryPath ? "text-accent" : "text-inherit")} />
+          </Link>
+          {/* Desktop: collapsible header */}
+          <button
+            type="button"
+            onClick={() => setLibraryOpen(prev => !prev)}
+            className={cn(
+              "hidden md:flex w-full items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
+              "px-3 py-[7px]",
+              isLibraryPath
+                ? "text-foreground font-medium"
+                : "text-text-secondary hover:text-text-primary hover:bg-overlay-4"
+            )}
+          >
+            <LibraryIcon className={cn("size-[18px] shrink-0", isLibraryPath ? "text-accent" : "text-inherit")} />
+            <span>{t("library")}</span>
+            <ChevronDownIcon className={cn(
+              "size-3.5 ml-auto transition-transform duration-200",
+              !libraryOpen && "-rotate-90"
+            )} />
+          </button>
+          {/* Desktop: sub-items */}
+          {libraryOpen && (
+            <div className="hidden md:block space-y-0.5">
+              {LIBRARY_SUB_ITEMS.map(item => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.labelKey}
+                    href={item.href}
+                    title={t(item.labelKey)}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
+                      "pl-7 pr-3 py-[7px]",
+                      isActive
+                        ? "text-foreground font-medium bg-accent-muted shadow-[inset_0_0_0_1px_var(--accent-muted)]"
+                        : "text-text-secondary hover:text-text-primary hover:bg-overlay-4"
+                    )}
+                  >
+                    <Icon className={cn("size-[18px] shrink-0", isActive ? "text-accent" : "text-inherit")} />
+                    <span>{t(item.labelKey)}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+          {/* Main nav items (translate, live) */}
           {mainItems.map(renderNavItem)}
         </div>
 
