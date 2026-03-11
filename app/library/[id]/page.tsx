@@ -36,6 +36,7 @@ import { GameHeroBanner } from "@/components/game-detail/GameHeroBanner"
 import { CoverSearchModal } from "@/components/game-detail/CoverSearchModal"
 import { EmulatorPanel } from "@/components/game-detail/EmulatorPanel"
 import { TranslationPanel } from "@/components/game-detail/TranslationPanel"
+import { MediaPanel } from "@/components/game-detail/MediaPanel"
 
 const HTML_ENGINES = ["rpg maker mv/mz", "tyranoscript", "gdevelop", "html"]
 
@@ -156,7 +157,7 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
       await api.translate.start(gameId, {
         provider: opts.provider,
         model: opts.model,
-        source_lang: game?.source_lang || "ja",
+        source_lang: game?.source_lang || "auto",
         preset_id: opts.presetId,
       })
       connect()
@@ -405,6 +406,9 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
             <ExportImportButtons gameId={game.id} onImportSuccess={() => refresh()} />
           </div>
         )}
+
+        {/* Media Panel */}
+        <MediaPanel gameId={game.id} />
 
         {/* Game Path */}
         <div className="rounded-lg p-4 bg-overlay-2 border border-overlay-4">
