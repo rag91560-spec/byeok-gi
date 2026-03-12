@@ -9,6 +9,8 @@ import {
   PauseIcon,
   Volume2Icon,
   PlusIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLocale } from "@/hooks/use-locale"
@@ -22,6 +24,7 @@ import { SelectionBar } from "@/components/media-grid/SelectionBar"
 import { AddMediaModal } from "@/components/media-grid/AddMediaModal"
 import { AudioPlayerBar } from "@/components/media-grid/AudioPlayerBar"
 import { AudioFullscreenPlayer } from "@/components/media-grid/AudioFullscreenPlayer"
+import { CategorySidebar } from "@/components/media-grid/CategorySidebar"
 
 type Tab = "my" | "game"
 
@@ -44,6 +47,7 @@ export default function AudioPage() {
   const [activeTrack, setActiveTrack] = useState<AudioItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [fullscreenTrack, setFullscreenTrack] = useState<AudioItem | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [thumbnailTargetId, setThumbnailTargetId] = useState<number | null>(null)
   const thumbnailInputRef = useRef<HTMLInputElement>(null)
 
@@ -173,6 +177,29 @@ export default function AudioPage() {
     api.categories.list("audio").then(setCategories).catch(() => {})
   }
 
+  const handleCreateCategory = async (name: string) => {
+    try {
+      await api.categories.create({ name, media_type: "audio" })
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleRenameCategory = async (id: number, name: string) => {
+    try {
+      await api.categories.update(id, { name })
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleDeleteCategory = async (id: number) => {
+    if (!await appConfirm(t("confirmDeleteCategory"))) return
+    try {
+      await api.categories.delete(id)
+      if (categoryFilter === id) setCategoryFilter(null)
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
   const handleChangeThumbnail = (id: number) => {
     setThumbnailTargetId(id)
     thumbnailInputRef.current?.click()
@@ -258,78 +285,99 @@ export default function AudioPage() {
 
       {/* Tab content */}
       {tab === "my" ? (
-        <div className="flex-1 flex flex-col min-h-0 p-4 gap-4">
-          <MediaToolbar
-            search={search}
-            onSearchChange={setSearch}
+        <div className="flex-1 flex min-h-0">
+          {/* Sidebar */}
+          <CategorySidebar
             categories={categories}
-            selectedCategoryId={categoryFilter}
-            onCategoryChange={setCategoryFilter}
-            onAdd={() => setShowAddModal(true)}
-            mediaType="audio"
-            onCategoriesChange={handleCategoriesRefresh}
+            activeCategory={categoryFilter}
+            onSelect={setCategoryFilter}
             totalCount={audioItems.length}
             uncategorizedCount={uncategorizedCount}
+            onCreateCategory={handleCreateCategory}
+            onRenameCategory={handleRenameCategory}
+            onDeleteCategory={handleDeleteCategory}
+            collapsed={sidebarCollapsed}
+            t={t}
           />
 
-          {/* Selection bar */}
-          {selectedIds.size > 0 && (
-            <SelectionBar
-              selectedCount={selectedIds.size}
-              categories={categories}
-              onBulkMove={handleBulkMove}
-              onDeselectAll={() => setSelectedIds(new Set())}
-            />
-          )}
+          {/* Content */}
+          <div className="flex-1 flex flex-col min-h-0 p-4 gap-4">
+            {/* Toolbar row */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-overlay-4 transition-colors shrink-0"
+                title={sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")}
+              >
+                {sidebarCollapsed ? <ChevronRightIcon className="size-4" /> : <ChevronLeftIcon className="size-4" />}
+              </button>
+              <MediaToolbar
+                search={search}
+                onSearchChange={setSearch}
+                onAdd={() => setShowAddModal(true)}
+                mediaType="audio"
+              />
+            </div>
 
-          <div className="flex-1 overflow-y-auto min-h-0" style={activeTrack ? { paddingBottom: 80 } : undefined}>
-            {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-                <MusicIcon className="size-12 text-text-tertiary opacity-30" />
-                <p className="text-sm text-text-secondary">
-                  {audioItems.length === 0 ? (t("noAudioFiles") || "No audio") : (t("noResults") || "No results")}
-                </p>
-                {audioItems.length === 0 && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowAddModal(true)}>
-                    <PlusIcon className="size-4" />
-                    {t("addFirstAudio")}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <MediaGrid>
-                {filtered.map((item) => (
-                  <MediaCard
-                    key={item.id}
-                    title={item.title}
-                    thumbnail={item.thumbnail || undefined}
-                    mediaType="audio"
-                    duration={item.duration}
-                    size={item.size}
-                    categoryId={item.category_id}
-                    categories={categories}
-                    isActive={activeTrack?.id === item.id}
-                    selectable
-                    selected={selectedIds.has(item.id)}
-                    onSelect={(checked) => handleSelect(item.id, checked)}
-                    onClick={() => setActiveTrack(item)}
-                    onDelete={() => handleDelete(item.id)}
-                    onChangeThumbnail={() => handleChangeThumbnail(item.id)}
-                    onMoveToCategory={(catId) => handleMoveToCategory(item.id, catId)}
-                  />
-                ))}
-              </MediaGrid>
+            {/* Selection bar */}
+            {selectedIds.size > 0 && (
+              <SelectionBar
+                selectedCount={selectedIds.size}
+                categories={categories}
+                onBulkMove={handleBulkMove}
+                onDeselectAll={() => setSelectedIds(new Set())}
+              />
+            )}
+
+            <div className="flex-1 overflow-y-auto min-h-0" style={activeTrack ? { paddingBottom: 80 } : undefined}>
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+                  <MusicIcon className="size-12 text-text-tertiary opacity-30" />
+                  <p className="text-sm text-text-secondary">
+                    {audioItems.length === 0 ? (t("noAudioFiles") || "No audio") : (t("noResults") || "No results")}
+                  </p>
+                  {audioItems.length === 0 && (
+                    <Button variant="secondary" size="sm" onClick={() => setShowAddModal(true)}>
+                      <PlusIcon className="size-4" />
+                      {t("addFirstAudio")}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <MediaGrid>
+                  {filtered.map((item) => (
+                    <MediaCard
+                      key={item.id}
+                      title={item.title}
+                      thumbnail={item.thumbnail || undefined}
+                      mediaType="audio"
+                      duration={item.duration}
+                      size={item.size}
+                      categoryId={item.category_id}
+                      categories={categories}
+                      isActive={activeTrack?.id === item.id}
+                      selectable
+                      selected={selectedIds.has(item.id)}
+                      onSelect={(checked) => handleSelect(item.id, checked)}
+                      onClick={() => setActiveTrack(item)}
+                      onDelete={() => handleDelete(item.id)}
+                      onChangeThumbnail={() => handleChangeThumbnail(item.id)}
+                      onMoveToCategory={(catId) => handleMoveToCategory(item.id, catId)}
+                    />
+                  ))}
+                </MediaGrid>
+              )}
+            </div>
+
+            {/* Add modal */}
+            {showAddModal && (
+              <AddMediaModal
+                mediaType="audio"
+                onClose={() => setShowAddModal(false)}
+                onAdded={handleAdded}
+              />
             )}
           </div>
-
-          {/* Add modal */}
-          {showAddModal && (
-            <AddMediaModal
-              mediaType="audio"
-              onClose={() => setShowAddModal(false)}
-              onAdded={handleAdded}
-            />
-          )}
         </div>
       ) : (
         /* Game Audio tab — existing layout preserved */
