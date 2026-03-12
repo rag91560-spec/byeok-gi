@@ -14,15 +14,16 @@ import type {
 const DEFAULT_SETTINGS: LiveSettings = {
   sourceId: "",
   sourceName: "",
-  language: "ja",
+  language: "auto",
   ocrEngine: "auto",
-  provider: "claude",
+  provider: "offline",
   model: "",
-  sourceLang: "ja",
+  sourceLang: "auto",
   targetLang: "ko",
   autoMode: false,
   autoIntervalMs: 2000,
   overlayEnabled: false,
+  overlayOpacity: 90,
   region: null,
   useVision: false,
 }
@@ -41,8 +42,10 @@ export function useLiveTranslation() {
   const [error, setError] = useState("")
   const [capturing, setCapturing] = useState(false)
   const [lastCapture, setLastCapture] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
   const resultIdRef = useRef(0)
+  const processingRef = useRef(false)
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
 
   // Persist settings
   useEffect(() => {
@@ -69,14 +72,15 @@ export function useLiveTranslation() {
 
   const captureAndTranslate = useCallback(async () => {
     const electron = window.electronAPI
-    if (!electron?.liveTranslation || !settings.sourceId) return
+    const s = settingsRef.current
+    if (!electron?.liveTranslation || !s.sourceId) return
 
     setLoading(true)
     setError("")
     try {
       const { image, error: captureError } = await electron.liveTranslation.captureScreen({
-        sourceId: settings.sourceId,
-        region: settings.region,
+        sourceId: s.sourceId,
+        region: s.region,
       })
       if (captureError || !image) {
         setError(captureError || "Capture failed")
@@ -93,10 +97,10 @@ export function useLiveTranslation() {
         imgEl.src = `data:image/png;base64,${image}`
       })
 
-      if (settings.useVision) {
+      if (s.useVision) {
         // Vision API: AI extracts text + positions + translates in one call
         const visionResult = await api.live.vision(
-          image, settings.sourceLang, settings.targetLang, settings.provider, settings.model
+          image, s.sourceLang, s.targetLang, s.provider, s.model
         )
         if (visionResult.error) {
           setError(visionResult.error)
@@ -124,12 +128,12 @@ export function useLiveTranslation() {
           mode: "vision",
         }
         setResults((prev) => [result, ...prev].slice(0, 50))
-        if (settings.overlayEnabled) {
-          electron.liveTranslation.updateOverlay(result)
+        if (s.overlayEnabled) {
+          electron.liveTranslation.updateOverlay({ ...result, overlayOpacity: s.overlayOpacity })
         }
       } else {
         // OCR → get blocks with positions → translate each block
-        const ocrResult = await api.live.ocr(image, settings.language, settings.ocrEngine)
+        const ocrResult = await api.live.ocr(image, s.language, s.ocrEngine)
         if (ocrResult.error) {
           setError(ocrResult.error)
           return
@@ -140,8 +144,11 @@ export function useLiveTranslation() {
         }
 
         // Translate blocks individually to preserve position mapping
+        // When language=auto, use OCR-detected language for translation source
+        const detectedLang = ocrResult.language || s.language
+        const effectiveSourceLang = s.language === "auto" ? "auto" : s.language
         const blockTranslation = await api.live.translateBlocks(
-          ocrResult.blocks, settings.sourceLang, settings.targetLang, settings.provider, settings.model
+          ocrResult.blocks, effectiveSourceLang, s.targetLang, s.provider, s.model, detectedLang
         )
         if (blockTranslation.error) {
           setError(blockTranslation.error)
@@ -161,8 +168,8 @@ export function useLiveTranslation() {
           mode: "ocr",
         }
         setResults((prev) => [result, ...prev].slice(0, 50))
-        if (settings.overlayEnabled) {
-          electron.liveTranslation.updateOverlay(result)
+        if (s.overlayEnabled) {
+          electron.liveTranslation.updateOverlay({ ...result, overlayOpacity: s.overlayOpacity })
         }
       }
     } catch (e) {
@@ -170,7 +177,7 @@ export function useLiveTranslation() {
     } finally {
       setLoading(false)
     }
-  }, [settings])
+  }, [])
 
   const selectRegion = useCallback(async () => {
     const electron = window.electronAPI
@@ -226,13 +233,12 @@ export function useLiveTranslation() {
     if (!electron?.liveTranslation || !capturing) return
 
     const cleanup = electron.liveTranslation.onAutoCaptureFrame(async ({ image }) => {
-      if (!image) return
+      if (!image || processingRef.current) return
+      processingRef.current = true
       setLastCapture(`data:image/png;base64,${image}`)
+      const s = settingsRef.current
 
       try {
-        const ocrResult = await api.live.ocr(image, settings.language, settings.ocrEngine)
-        if (!ocrResult.full_text.trim() || ocrResult.error) return
-
         // Get image dimensions
         const imgEl = new Image()
         const imgSize = await new Promise<{ w: number; h: number }>((resolve) => {
@@ -241,36 +247,90 @@ export function useLiveTranslation() {
           imgEl.src = `data:image/png;base64,${image}`
         })
 
-        const blockTranslation = await api.live.translateBlocks(
-          ocrResult.blocks, settings.sourceLang, settings.targetLang, settings.provider, settings.model
-        )
-        if (blockTranslation.error) return
+        if (s.useVision) {
+          // Vision API: AI extracts text + positions + translates in one call
+          const visionResult = await api.live.vision(
+            image, s.sourceLang, s.targetLang, s.provider, s.model
+          )
+          if (visionResult.error) return
 
-        const id = String(++resultIdRef.current)
-        const result: LiveTranslationResult = {
-          id,
-          original: ocrResult.full_text,
-          translated: blockTranslation.blocks.map((b) => b.translated).join("\n"),
-          blocks: ocrResult.blocks,
-          translatedBlocks: blockTranslation.blocks,
-          imageWidth: imgSize.w,
-          imageHeight: imgSize.h,
-          timestamp: Date.now(),
-          mode: "ocr",
-        }
-        setResults((prev) => {
-          if (prev.length > 0 && prev[0].original === result.original) return prev
-          return [result, ...prev].slice(0, 50)
-        })
+          const id = String(++resultIdRef.current)
+          const translatedBlocks: TranslatedBlock[] = visionResult.entries.map((e) => ({
+            original: e.original,
+            translated: e.translated,
+            x: (e.x / 100) * imgSize.w,
+            y: (e.y / 100) * imgSize.h,
+            width: (e.width / 100) * imgSize.w,
+            height: (e.height / 100) * imgSize.h,
+          }))
+          const result: LiveTranslationResult = {
+            id,
+            original: visionResult.entries.map((e) => e.original).join("\n"),
+            translated: visionResult.entries.map((e) => e.translated).join("\n"),
+            blocks: translatedBlocks.map((b) => ({ text: b.original, x: b.x, y: b.y, width: b.width, height: b.height })),
+            translatedBlocks,
+            imageWidth: imgSize.w,
+            imageHeight: imgSize.h,
+            timestamp: Date.now(),
+            mode: "vision",
+          }
+          setResults((prev) => {
+            if (prev.length > 0 && prev[0].original === result.original) return prev
+            return [result, ...prev].slice(0, 50)
+          })
 
-        if (settings.overlayEnabled && electron.liveTranslation) {
-          electron.liveTranslation.updateOverlay(result)
+          if (s.overlayEnabled && electron.liveTranslation) {
+            electron.liveTranslation.updateOverlay({ ...result, overlayOpacity: s.overlayOpacity })
+          }
+        } else {
+          const ocrResult = await api.live.ocr(image, s.language, s.ocrEngine)
+          if (!ocrResult.full_text.trim() || ocrResult.error) return
+
+          const detectedLang = ocrResult.language || s.language
+          const effectiveSourceLang = s.language === "auto" ? "auto" : s.language
+          const blockTranslation = await api.live.translateBlocks(
+            ocrResult.blocks, effectiveSourceLang, s.targetLang, s.provider, s.model, detectedLang
+          )
+          if (blockTranslation.error) return
+
+          const id = String(++resultIdRef.current)
+          const result: LiveTranslationResult = {
+            id,
+            original: ocrResult.full_text,
+            translated: blockTranslation.blocks.map((b) => b.translated).join("\n"),
+            blocks: ocrResult.blocks,
+            translatedBlocks: blockTranslation.blocks,
+            imageWidth: imgSize.w,
+            imageHeight: imgSize.h,
+            timestamp: Date.now(),
+            mode: "ocr",
+          }
+          setResults((prev) => {
+            if (prev.length > 0 && prev[0].original === result.original) return prev
+            return [result, ...prev].slice(0, 50)
+          })
+
+          if (s.overlayEnabled && electron.liveTranslation) {
+            electron.liveTranslation.updateOverlay({ ...result, overlayOpacity: s.overlayOpacity })
+          }
         }
-      } catch { /* ignore auto-capture errors */ }
+      } catch { /* ignore auto-capture errors */ } finally {
+        processingRef.current = false
+      }
     })
 
     return cleanup
-  }, [capturing, settings])
+  }, [capturing])
+
+  // Cleanup auto-capture on unmount
+  useEffect(() => {
+    return () => {
+      const electron = window.electronAPI
+      if (electron?.liveTranslation) {
+        electron.liveTranslation.stopAutoCapture()
+      }
+    }
+  }, [])
 
   // Register hotkeys when on live page
   useEffect(() => {

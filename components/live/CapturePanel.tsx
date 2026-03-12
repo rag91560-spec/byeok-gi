@@ -11,6 +11,8 @@ import {
   EyeIcon,
   EyeOffIcon,
   Settings2Icon,
+  ArrowRightIcon,
+  LockIcon,
 } from "lucide-react"
 import type { LiveSettings, CaptureSource } from "@/lib/types"
 
@@ -25,6 +27,7 @@ interface CapturePanelProps {
   onSelectRegion: () => void
   onClearRegion: () => void
   onToggleOverlay: () => void
+  licensed?: boolean
 }
 
 export function CapturePanel({
@@ -38,6 +41,7 @@ export function CapturePanel({
   onSelectRegion,
   onClearRegion,
   onToggleOverlay,
+  licensed = false,
 }: CapturePanelProps) {
   return (
     <div className="space-y-4">
@@ -109,20 +113,67 @@ export function CapturePanel({
         )}
       </div>
 
-      {/* Settings */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-[11px] text-text-tertiary mb-1 block">OCR 언어</label>
+      {/* Language: Source → Target */}
+      <div>
+        <label className="text-[11px] text-text-tertiary mb-1.5 block">번역 방향</label>
+        <div className="flex items-center gap-2">
           <select
             value={settings.language}
             onChange={(e) => onUpdateSettings({ language: e.target.value })}
-            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="flex-1 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
+            <option value="auto">자동 감지</option>
             <option value="ja">일본어</option>
+            <option value="en">영어</option>
             <option value="zh">중국어 (간체)</option>
             <option value="zh-tw">중국어 (번체)</option>
             <option value="ko">한국어</option>
+          </select>
+          <ArrowRightIcon className="size-4 text-text-tertiary shrink-0" />
+          <select
+            value={settings.targetLang}
+            onChange={(e) => onUpdateSettings({ targetLang: e.target.value })}
+            className="flex-1 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+          >
+            <option value="ko">한국어</option>
             <option value="en">영어</option>
+            <option value="ja">일본어</option>
+            <option value="zh">중국어</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Provider & Engine */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <label className="text-[11px] text-text-tertiary">번역 제공자</label>
+            {!licensed && (
+              <span className="text-[10px] text-text-tertiary flex items-center gap-0.5">
+                <LockIcon className="size-2.5" /> AI 잠금
+              </span>
+            )}
+          </div>
+          <select
+            value={settings.provider}
+            onChange={(e) => {
+              const val = e.target.value
+              if (!licensed && val !== "offline" && val !== "test") return
+              onUpdateSettings({ provider: val })
+            }}
+            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+          >
+            <option value="offline">오프라인 (NLLB)</option>
+            <option value="claude" disabled={!licensed}>
+              {licensed ? "Claude" : "Claude (라이선스 필요)"}
+            </option>
+            <option value="openai" disabled={!licensed}>
+              {licensed ? "OpenAI" : "OpenAI (라이선스 필요)"}
+            </option>
+            <option value="gemini" disabled={!licensed}>
+              {licensed ? "Gemini" : "Gemini (라이선스 필요)"}
+            </option>
+            <option value="test">테스트 (Echo)</option>
           </select>
         </div>
 
@@ -135,50 +186,12 @@ export function CapturePanel({
           >
             <option value="auto">자동 (추천)</option>
             <option value="winocr">Windows OCR</option>
-            <option value="tesseract">Tesseract</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-[11px] text-text-tertiary mb-1 block">번역 제공자</label>
-          <select
-            value={settings.provider}
-            onChange={(e) => onUpdateSettings({ provider: e.target.value })}
-            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
-          >
-            <option value="test">테스트 (API 키 불필요)</option>
-            <option value="claude">Claude</option>
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-[11px] text-text-tertiary mb-1 block">대상 언어</label>
-          <select
-            value={settings.targetLang}
-            onChange={(e) => onUpdateSettings({ targetLang: e.target.value })}
-            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
-          >
-            <option value="ko">한국어</option>
-            <option value="en">영어</option>
-            <option value="zh">중국어</option>
           </select>
         </div>
       </div>
 
       {/* Advanced toggles */}
-      <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-          <input
-            type="checkbox"
-            checked={settings.useVision}
-            onChange={(e) => onUpdateSettings({ useVision: e.target.checked })}
-            className="accent-accent"
-          />
-          Vision API (이미지 직접 분석)
-        </label>
-
+      <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-[11px] text-text-tertiary">자동 간격</label>
           <select
@@ -191,6 +204,20 @@ export function CapturePanel({
             <option value={3000}>3초</option>
             <option value={5000}>5초</option>
           </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] text-text-tertiary">오버레이 불투명도</label>
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={settings.overlayOpacity}
+            onChange={(e) => onUpdateSettings({ overlayOpacity: Number(e.target.value) })}
+            className="w-20 h-1 accent-accent"
+          />
+          <span className="text-[11px] text-text-tertiary w-8">{settings.overlayOpacity}%</span>
         </div>
       </div>
 

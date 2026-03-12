@@ -210,24 +210,6 @@ export interface SdkSetupProgress {
   error: string | null
 }
 
-export interface ElectronAPI {
-  isElectron: boolean
-  platform: string
-  getAppVersion: () => Promise<string>
-  checkForUpdates: () => Promise<unknown>
-  downloadUpdate: () => Promise<void>
-  installUpdate: () => Promise<void>
-  onUpdateAvailable: (cb: (data: { version: string; releaseDate: string }) => void) => () => void
-  onUpdateProgress: (cb: (data: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void) => () => void
-  onUpdateDownloaded: (cb: () => void) => () => void
-  selectApkFile: () => Promise<string[]>
-  selectApkFolder: () => Promise<string>
-  selectSubtitleFiles: () => Promise<string[]>
-  openHtmlGame: (opts: { gameId: number; title: string; serveUrl: string }) => Promise<void>
-  closeHtmlGame: (opts: { gameId: number }) => Promise<void>
-  showConfirm: (message: string) => Promise<boolean>
-}
-
 // --- QA ---
 
 export interface QAResult {
@@ -483,6 +465,7 @@ export interface LiveSettings {
   autoMode: boolean
   autoIntervalMs: number
   overlayEnabled: boolean
+  overlayOpacity: number
   region: CaptureRegion | null
   useVision: boolean
 }
@@ -543,6 +526,7 @@ export interface ElectronAPI {
   onUpdateAvailable: (cb: (data: { version: string; releaseDate: string }) => void) => () => void
   onUpdateProgress: (cb: (data: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void) => () => void
   onUpdateDownloaded: (cb: () => void) => () => void
+  selectGameFolder: () => Promise<string>
   selectApkFile: () => Promise<string[]>
   selectApkFolder: () => Promise<string>
   selectSubtitleFiles: () => Promise<string[]>
@@ -551,6 +535,8 @@ export interface ElectronAPI {
   showConfirm: (message: string) => Promise<boolean>
   selectVideoFiles: () => Promise<string[]>
   selectVideoFolder: () => Promise<string>
+  registerKillHotkey: (key: string) => Promise<boolean>
+  unregisterKillHotkey: () => Promise<void>
   liveTranslation: LiveTranslationAPI
 }
 

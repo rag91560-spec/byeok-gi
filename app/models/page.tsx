@@ -30,6 +30,7 @@ interface ModelInfo {
   quality: string
   quality_key?: TranslationKey
   installed: boolean
+  status?: "dev" | "available"
 }
 
 interface DownloadStatus {
@@ -240,6 +241,7 @@ export default function ModelsPage() {
             const isFailed = dl && dl.status === "failed"
             const isCancelled = dl && dl.status === "cancelled"
             const isDeletingThis = deleting[model.id]
+            const isDev = model.status === "dev"
 
             return (
               <Card key={model.id} className="bg-surface">
@@ -254,7 +256,14 @@ export default function ModelsPage() {
                         }`} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold text-text-primary">{model.name}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-text-primary">{model.name}</h3>
+                          {isDev && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/15 text-warning border border-warning/25">
+                              개발중
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-text-secondary mt-0.5">{model.desc_key ? t(model.desc_key) : model.desc}</p>
                         <div className="flex items-center gap-4 mt-2">
                           <span className="flex items-center gap-1 text-xs text-text-tertiary">
@@ -320,8 +329,9 @@ export default function ModelsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-xs text-accent hover:text-accent h-7 px-2"
+                            className={`text-xs h-7 px-2 ${isDev ? "text-text-tertiary cursor-not-allowed" : "text-accent hover:text-accent"}`}
                             onClick={() => handleDownload(model.id)}
+                            disabled={isDev}
                           >
                             <DownloadIcon className="size-3.5 mr-1" />
                             {t("download")}

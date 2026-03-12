@@ -339,7 +339,7 @@ export default function StringsPage({
     } finally {
       setLoading(false)
     }
-  }, [gameId, page, statusFilter, search, qaOnly])
+  }, [gameId, page, statusFilter, search, qaOnly, t])
 
   useEffect(() => {
     fetchStrings()

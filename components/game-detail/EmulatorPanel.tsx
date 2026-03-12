@@ -274,10 +274,6 @@ export function EmulatorPanel({ gameId, game }: EmulatorPanelProps) {
         </div>
       )}
 
-      {/* Translation not available notice */}
-      <p className="mt-4 text-xs text-text-tertiary border-t border-overlay-4 pt-3">
-        {t("translationNotAvailable")}
-      </p>
     </div>
   )
 }

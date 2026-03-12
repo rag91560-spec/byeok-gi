@@ -15,6 +15,8 @@ export interface ProviderInfo {
   pricing?: string
   /** Free tier info */
   freeTier?: string
+  /** Whether this provider is disabled (e.g. still in development) */
+  disabled?: boolean
 }
 
 export const PROVIDERS: ProviderInfo[] = [
@@ -102,6 +104,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: false,
     models: ["game-translator-7b-q4"],
     defaultModel: "game-translator-7b-q4",
+    disabled: true,
   },
 ]
 
@@ -114,7 +117,7 @@ export function getProvider(id: string): ProviderInfo | undefined {
 export const KEY_PROVIDERS = PROVIDERS.filter((p) => p.needsKey)
 
 /** Provider IDs used in presets (simplified — backend resolves claude variants) */
-export const PRESET_PROVIDER_IDS = ["", "claude", "openai", "gemini", "deepseek", "offline", "offline_hq"] as const
+export const PRESET_PROVIDER_IDS = ["", "claude", "openai", "gemini", "deepseek", "offline"] as const
 
 /** Static display names for preset providers */
 export const PRESET_PROVIDER_NAMES: Record<string, string> = {

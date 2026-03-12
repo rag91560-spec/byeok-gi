@@ -477,6 +477,9 @@ export default function LibraryPage() {
                   placeholder="D:\Games\MyGame"
                   className="flex-1 h-10 px-3 rounded-lg border border-border bg-background text-text-primary text-sm font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all"
                 />
+                <Button variant="ghost" size="sm" onClick={async () => { const p = await window.electronAPI?.selectGameFolder(); if (p) setAddPath(p); }} className="shrink-0">
+                  <FolderOpenIcon className="size-4" />
+                </Button>
                 <Button variant="default" size="sm" onClick={handleAddGame} loading={addLoading} className="shrink-0">
                   <PlusIcon className="size-4" /> {t("add")}
                 </Button>
@@ -496,6 +499,9 @@ export default function LibraryPage() {
                   placeholder="D:\Games"
                   className="flex-1 h-10 px-3 rounded-lg border border-border bg-background text-text-primary text-sm font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all"
                 />
+                <Button variant="ghost" size="sm" onClick={async () => { const p = await window.electronAPI?.selectGameFolder(); if (p) setScanPath(p); }} className="shrink-0">
+                  <FolderOpenIcon className="size-4" />
+                </Button>
                 <Button variant="secondary" size="sm" onClick={handleScanDirectory} loading={scanLoading} className="shrink-0">
                   <ScanIcon className="size-4" /> {t("scan")}
                 </Button>
