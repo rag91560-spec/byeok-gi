@@ -141,6 +141,11 @@ export const api = {
     get: () => request<Settings>("/settings"),
     put: (data: Settings) =>
       request<Settings>("/settings", { method: "PUT", body: JSON.stringify(data) }),
+    testKey: (provider: string, key: string) =>
+      request<{ ok: boolean; error?: string }>("/settings/test-key", {
+        method: "POST",
+        body: JSON.stringify({ provider, key }),
+      }),
   },
 
   license: {
@@ -400,12 +405,6 @@ export const api = {
       return { blob, filename }
     },
 
-    exportJson: (gameId: number) =>
-      request<Blob>(`/games/${gameId}/project/export`),
-
-    exportCsv: (gameId: number) =>
-      request<Blob>(`/games/${gameId}/project/export/csv`),
-
     importJson: (gameId: number, data: FormData) =>
       fetch(`${BASE}/games/${gameId}/project/import`, { method: "POST", body: data })
         .then(r => r.json()) as Promise<ImportResult>,
@@ -481,9 +480,11 @@ export const api = {
     translateBlocks: (
       blocks: Array<{ text: string; x: number; y: number; width: number; height: number }>,
       sourceLang?: string, targetLang?: string, provider?: string, model?: string,
+      detectedLang?: string,
     ) =>
       request<{
         blocks: Array<{ original: string; translated: string; x: number; y: number; width: number; height: number }>
+        source_lang?: string
         error?: string
       }>("/live/translate-blocks", {
         method: "POST",
@@ -493,6 +494,7 @@ export const api = {
           target_lang: targetLang ?? "ko",
           provider: provider ?? "claude",
           model: model ?? "",
+          detected_lang: detectedLang ?? "",
         }),
       }),
 
@@ -513,11 +515,6 @@ export const api = {
 
     cacheStats: () => request<{ size: number; max_size: number }>("/live/cache/stats"),
     cacheClear: () => request<{ ok: boolean }>("/live/cache/clear", { method: "POST" }),
-
-    wsUrl: () => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-      return `${protocol}//${window.location.hostname}:8000/api/live/ws`
-    },
   },
 
   videos: {

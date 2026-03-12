@@ -248,6 +248,13 @@ export function useTranslationProgress(gameId: number | null) {
       es.close()
     })
 
+    es.addEventListener("idle", () => {
+      retryCountRef.current = 0
+      setStatus("idle")
+      es.close()
+      eventSourceRef.current = null
+    })
+
     es.addEventListener("heartbeat", () => {
       retryCountRef.current = 0
     })
@@ -263,6 +270,7 @@ export function useTranslationProgress(gameId: number | null) {
         }, delay)
       } else {
         retryCountRef.current = 0
+        // Check if backend still has a running job before giving up
         setStatus("idle")
       }
     }

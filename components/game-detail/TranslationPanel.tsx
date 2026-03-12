@@ -105,7 +105,7 @@ export function TranslationPanel({
           {t("aiProvider")}
         </label>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
-          {PROVIDERS.map((p) => (
+          {PROVIDERS.filter((p) => !p.disabled).map((p) => (
             <ChipButton
               key={p.id}
               selected={provider === p.id}

@@ -368,28 +368,26 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
         {/* Android: Emulator Status Panel */}
         {isAndroid && <EmulatorPanel gameId={game.id} game={game} />}
 
-        {/* Translation Panel (Windows games only) */}
-        {!isAndroid && (
-          <TranslationPanel
-            game={game}
-            gameId={game.id}
-            isTranslating={isTranslating}
-            progress={progress}
-            txMessage={txMessage}
-            license={license}
-            onRefresh={refresh}
-            onActionError={setActionError}
-            onTranslateStart={handleTranslateStart}
-            onCancel={handleCancel}
-            onLicenseRefresh={refreshLicense}
-          />
-        )}
+        {/* Translation Panel */}
+        <TranslationPanel
+          game={game}
+          gameId={game.id}
+          isTranslating={isTranslating}
+          progress={progress}
+          txMessage={txMessage}
+          license={license}
+          onRefresh={refresh}
+          onActionError={setActionError}
+          onTranslateStart={handleTranslateStart}
+          onCancel={handleCancel}
+          onLicenseRefresh={refreshLicense}
+        />
 
         {/* QA Panel */}
-        {!isAndroid && game.string_count > 0 && <QAPanel gameId={game.id} t={t} />}
+        {game.string_count > 0 && <QAPanel gameId={game.id} t={t} />}
 
         {/* Tools: String Editor, Flow Graph, Export/Import */}
-        {!isAndroid && game.string_count > 0 && (
+        {game.string_count > 0 && (
           <div className="space-y-2">
             <div className="flex gap-2">
               <Link href={`/library/${game.id}/strings`} className="flex-1">

@@ -50,9 +50,11 @@ function killProcess(proc) {
   if (!proc || proc.killed) return
   try {
     if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(proc.pid), "/f", "/t"], {
-        stdio: "ignore",
-      })
+      // /t kills entire process tree (uvicorn reloader + worker)
+      const { execSync } = require("child_process")
+      try {
+        execSync(`taskkill /pid ${proc.pid} /f /t`, { stdio: "ignore", timeout: 5000 })
+      } catch {}
     } else {
       proc.kill("SIGTERM")
     }
@@ -65,9 +67,12 @@ function findPython() {
   const { execSync } = require("child_process")
   for (const cmd of ["python", "python3", "py"]) {
     try {
-      execSync(`${cmd} --version`, { stdio: "ignore" })
-      _cachedPython = cmd
-      return cmd
+      // Get the full path to python executable so DLL resolution works correctly
+      const fullPath = execSync(`${cmd} -c "import sys; print(sys.executable)"`, { encoding: "utf-8" }).trim()
+      if (fullPath) {
+        _cachedPython = fullPath
+        return fullPath
+      }
     } catch {}
   }
   return null
@@ -98,7 +103,7 @@ async function startBackend() {
         "--port", String(BACKEND_PORT),
         "--reload",
       ],
-      { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }
+      { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } }
     )
   } else {
     // Production: run PyInstaller-built backend.exe
@@ -285,6 +290,7 @@ function createWindow() {
       document.documentElement.classList.add('is-electron');
     `)
     if (isDev) {
+      mainWindow.webContents.openDevTools({ mode: "detach" })
       mainWindow.webContents.executeJavaScript(`
         new MutationObserver(() => {
           document.querySelectorAll('button').forEach(b => {
@@ -375,6 +381,15 @@ ipcMain.handle("show-confirm-dialog", async (event, message) => {
     message: typeof message === "string" ? message : "Are you sure?",
   })
   return result.response === 1
+})
+
+// Game folder dialog
+ipcMain.handle("select-game-folder", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select game folder",
+    properties: ["openDirectory"],
+  })
+  return result.filePaths[0] || ""
 })
 
 // APK file dialogs
@@ -702,6 +717,39 @@ ipcMain.handle("live:unregister-hotkeys", () => {
   globalShortcut.unregister("CommandOrControl+Shift+R")
 })
 
+// ── Kill Hotkey ──
+
+let currentKillHotkey = null
+
+ipcMain.handle("register-kill-hotkey", (event, accelerator) => {
+  // Unregister previous kill hotkey if any
+  if (currentKillHotkey) {
+    try { globalShortcut.unregister(currentKillHotkey) } catch {}
+  }
+  try {
+    const ok = globalShortcut.register(accelerator, () => {
+      console.log("[electron] Kill hotkey triggered:", accelerator)
+      cleanup()
+      app.quit()
+    })
+    if (ok) {
+      currentKillHotkey = accelerator
+      console.log("[electron] Kill hotkey registered:", accelerator)
+    }
+    return ok
+  } catch (err) {
+    console.error("[electron] Failed to register kill hotkey:", err.message)
+    return false
+  }
+})
+
+ipcMain.handle("unregister-kill-hotkey", () => {
+  if (currentKillHotkey) {
+    try { globalShortcut.unregister(currentKillHotkey) } catch {}
+    currentKillHotkey = null
+  }
+})
+
 // ── App Lifecycle ──
 
 function cleanup() {
@@ -732,7 +780,49 @@ function cleanup() {
   frontendProcess = null
 }
 
+// ── OCR Language Pack Auto-Install ──
+
+async function ensureOcrLanguagePacks() {
+  const needed = ["ja", "en-US", "ko", "zh-Hans-CN"]
+
+  try {
+    // Single elevated PowerShell: check + install missing packs
+    const script = `
+      $needed = @(${needed.map((l) => `'${l}'`).join(",")})
+      $missing = @()
+      foreach ($lang in $needed) {
+        $cap = Get-WindowsCapability -Online -Name "Language.OCR~~~$lang~0.0.1.0"
+        if ($cap.State -ne 'Installed') { $missing += $lang }
+      }
+      if ($missing.Count -eq 0) { Write-Host 'ALL_INSTALLED'; exit 0 }
+      foreach ($lang in $missing) {
+        Write-Host "Installing OCR: $lang"
+        Add-WindowsCapability -Online -Name "Language.OCR~~~$lang~0.0.1.0" | Out-Null
+      }
+      Write-Host 'INSTALL_DONE'
+    `.replace(/\n/g, " ")
+
+    const result = await new Promise((resolve, reject) => {
+      const ps = spawn("powershell", [
+        "-Command",
+        `Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -Command ${script.replace(/'/g, "'''")}' -Verb RunAs -Wait`
+      ], { stdio: "pipe" })
+      let out = ""
+      ps.stdout?.on("data", (d) => { out += d.toString() })
+      ps.on("close", (code) => resolve({ code, out }))
+      ps.on("error", (err) => reject(err))
+    })
+
+    console.log("[electron] OCR language pack result:", result.code, result.out.trim())
+  } catch (err) {
+    console.warn("[electron] OCR language pack install failed:", err.message)
+  }
+}
+
 app.whenReady().then(async () => {
+  // Install OCR language packs in background (non-blocking)
+  ensureOcrLanguagePacks().catch(() => {})
+
   await startBackend()
   await startFrontend()
 
@@ -753,6 +843,35 @@ app.whenReady().then(async () => {
   console.log("[electron] Servers ready, opening window")
   createWindow()
   setupAutoUpdater()
+
+  // Load kill hotkey from settings
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.get(`http://localhost:${BACKEND_PORT}/api/settings`, (resp) => {
+        let data = ""
+        resp.on("data", (chunk) => { data += chunk })
+        resp.on("end", () => {
+          try { resolve(JSON.parse(data)) } catch { resolve({}) }
+        })
+      })
+      req.on("error", () => resolve({}))
+      req.setTimeout(3000, () => { req.destroy(); resolve({}) })
+    })
+    const hotkey = res.hotkey_kill
+    if (hotkey && typeof hotkey === "string") {
+      const ok = globalShortcut.register(hotkey, () => {
+        console.log("[electron] Kill hotkey triggered:", hotkey)
+        cleanup()
+        app.quit()
+      })
+      if (ok) {
+        currentKillHotkey = hotkey
+        console.log("[electron] Kill hotkey auto-registered:", hotkey)
+      }
+    }
+  } catch (err) {
+    console.warn("[electron] Failed to load kill hotkey from settings:", err.message)
+  }
 })
 
 app.on("window-all-closed", () => {

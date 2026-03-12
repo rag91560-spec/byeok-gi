@@ -55,7 +55,7 @@ export default function PresetsPage() {
 
   const PROVIDERS = useMemo(() => PRESET_PROVIDER_IDS.map((id) => ({
     id,
-    name: id === "" ? t("useDefault") : id === "offline" ? t("offlineNllb") : id === "offline_hq" ? t("offlineHq") : PRESET_PROVIDER_NAMES[id] || id,
+    name: id === "" ? t("useDefault") : id === "offline" ? t("offlineNllb") : PRESET_PROVIDER_NAMES[id] || id,
   })), [t])
   const TONES = useMemo(() => TONE_IDS.map((id) => ({
     id,

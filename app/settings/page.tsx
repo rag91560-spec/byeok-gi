@@ -13,6 +13,10 @@ import {
   ChevronDownIcon,
   ShieldCheckIcon,
   SettingsIcon,
+  Loader2Icon,
+  ZapIcon,
+  XCircleIcon,
+  KeyboardIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +30,7 @@ import { Paywall } from "@/components/ui/paywall"
 import { useLocale } from "@/hooks/use-locale"
 import { useSettings, useLicenseStatus } from "@/hooks/use-api"
 import { KEY_PROVIDERS } from "@/lib/providers"
+import { api } from "@/lib/api"
 
 export default function SettingsPage() {
   const { t } = useLocale()
@@ -41,6 +46,12 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState("")
   const [licenseKey, setLicenseKey] = useState("")
+  const [testingKey, setTestingKey] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; error?: string }>>({})
+  const [killHotkey, setKillHotkey] = useState("Ctrl+Shift+Q")
+  const [isCapturingHotkey, setIsCapturingHotkey] = useState(false)
+  const [hotkeyStatus, setHotkeyStatus] = useState<"idle" | "success" | "error">("idle")
+
 
   // Load settings into local state
   useEffect(() => {
@@ -66,12 +77,34 @@ export default function SettingsPage() {
       if (typeof settings.license_key === "string") {
         setLicenseKey(settings.license_key)
       }
+      if (typeof settings.hotkey_kill === "string") {
+        setKillHotkey(settings.hotkey_kill)
+      }
     }
   }, [loading, settings])
 
   const toggleKeyVisibility = (id: string) => {
     setShowKeys((prev) => ({ ...prev, [id]: !prev[id] }))
   }
+
+  const handleTestKey = useCallback(async (providerId: string) => {
+    const key = keys[providerId]
+    if (!key) return
+    setTestingKey(providerId)
+    setTestResult((prev) => {
+      const next = { ...prev }
+      delete next[providerId]
+      return next
+    })
+    try {
+      const res = await api.settings.testKey(providerId, key)
+      setTestResult((prev) => ({ ...prev, [providerId]: res }))
+    } catch {
+      setTestResult((prev) => ({ ...prev, [providerId]: { ok: false, error: "연결 실패" } }))
+    } finally {
+      setTestingKey(null)
+    }
+  }, [keys])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -96,7 +129,13 @@ export default function SettingsPage() {
         default_provider: defaultProvider,
         default_source_lang: defaultLang,
         license_key: trimmedKey,
+        hotkey_kill: killHotkey,
       })
+      // Register kill hotkey in Electron
+      if (killHotkey && window.electronAPI) {
+        const electronAccelerator = killHotkey.replace("Ctrl", "CommandOrControl")
+        window.electronAPI.registerKillHotkey(electronAccelerator)
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
@@ -105,7 +144,7 @@ export default function SettingsPage() {
     } finally {
       setSaving(false)
     }
-  }, [keys, scanDirs, defaultProvider, defaultLang, licenseKey, save])
+  }, [keys, scanDirs, defaultProvider, defaultLang, licenseKey, killHotkey, save])
 
   return (
     <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
@@ -169,7 +208,7 @@ export default function SettingsPage() {
                 </span>
               ) : null}
               <button
-                onClick={async () => { await save({ ...settings!, license_key: licenseKey.trim() }); verifyLicense() }}
+                onClick={async () => { await save({ license_key: licenseKey.trim() }); verifyLicense() }}
                 disabled={licenseLoading || !licenseKey}
                 className="text-xs text-accent hover:text-accent/80 disabled:text-text-tertiary disabled:cursor-not-allowed transition-colors"
               >
@@ -212,6 +251,56 @@ export default function SettingsPage() {
                 <option value="zh">{t("chinese")}</option>
               </select>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Shortcuts */}
+      <Card className="bg-surface">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <KeyboardIcon className="size-5 text-accent" />
+            {t("shortcuts")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-1 block">
+              {t("killHotkey")}
+            </label>
+            <p className="text-[11px] text-text-tertiary mb-2">
+              {t("killHotkeyDescription")}
+            </p>
+            <input
+              type="text"
+              readOnly
+              value={isCapturingHotkey ? t("pressKeys") : killHotkey}
+              onFocus={() => setIsCapturingHotkey(true)}
+              onBlur={() => setIsCapturingHotkey(false)}
+              onKeyDown={(e) => {
+                if (!isCapturingHotkey) return
+                e.preventDefault()
+                // Ignore lone modifier keys
+                if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return
+                const parts: string[] = []
+                if (e.ctrlKey) parts.push("Ctrl")
+                if (e.shiftKey) parts.push("Shift")
+                if (e.altKey) parts.push("Alt")
+                // Normalize key name
+                let key = e.key
+                if (key === " ") key = "Space"
+                else if (key.length === 1) key = key.toUpperCase()
+                parts.push(key)
+                setKillHotkey(parts.join("+"))
+                setIsCapturingHotkey(false)
+                ;(e.target as HTMLInputElement).blur()
+              }}
+              className={`w-full h-10 px-3 rounded-lg border text-sm font-mono text-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all ${
+                isCapturingHotkey
+                  ? "border-accent bg-accent/10 text-accent animate-pulse"
+                  : "border-border bg-surface-elevated text-text-primary"
+              }`}
+            />
           </div>
         </CardContent>
       </Card>
@@ -290,6 +379,31 @@ export default function SettingsPage() {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleTestKey(provider.id)}
+                    disabled={!keys[provider.id] || testingKey === provider.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium text-text-secondary hover:text-text-primary bg-surface-elevated hover:bg-overlay-6 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {testingKey === provider.id ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      <ZapIcon className="size-3.5" />
+                    )}
+                    {t("testConnection")}
+                  </button>
+                  {testResult[provider.id] && (
+                    <span className={`inline-flex items-center gap-1 text-xs font-medium ${
+                      testResult[provider.id].ok
+                        ? "text-success"
+                        : "text-error"
+                    }`}>
+                      {testResult[provider.id].ok ? (
+                        <><CheckIcon className="size-3" /> {t("connectionSuccess")}</>
+                      ) : (
+                        <><XCircleIcon className="size-3" /> {testResult[provider.id].error}</>
+                      )}
+                    </span>
+                  )}
                   {provider.keyUrl && (
                     <a
                       href={provider.keyUrl}
@@ -381,29 +495,37 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Save */}
-      <Button
-        variant="default"
-        size="md"
-        className="w-full"
-        onClick={handleSave}
-        loading={saving}
-      >
-        {saved ? (
-          <>
-            <CheckIcon className="size-4" />
-            {t("saved")}
-          </>
-        ) : (
-          <>
-            <SaveIcon className="size-4" />
-            {t("save")}
-          </>
-        )}
-      </Button>
-      {saveError && (
-        <p className="text-xs text-red-400 text-center mt-2">{saveError}</p>
-      )}
+      {/* spacer for sticky bar */}
+      <div className="h-16" />
+
+      {/* Sticky Save Bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/80 backdrop-blur-xl">
+        <div className="max-w-3xl mx-auto px-6 md:px-8 py-3 flex items-center justify-between gap-3">
+          {saveError && (
+            <p className="text-xs text-red-400 truncate">{saveError}</p>
+          )}
+          {!saveError && <div />}
+          <Button
+            variant="default"
+            size="md"
+            onClick={handleSave}
+            loading={saving}
+            className="shrink-0 min-w-[120px]"
+          >
+            {saved ? (
+              <>
+                <CheckIcon className="size-4" />
+                {t("saved")}
+              </>
+            ) : (
+              <>
+                <SaveIcon className="size-4" />
+                {t("save")}
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

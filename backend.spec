@@ -1,17 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for Game Translator backend."""
 
-from PyInstaller.utils.hooks import collect_submodules
+import os
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
 
 backend_submodules = collect_submodules("backend")
 
+# Collect rapidocr ONNX models + config
+rapidocr_datas = collect_data_files("rapidocr_onnxruntime", include_py_files=False)
+
 a = Analysis(
     ["backend/main.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[*rapidocr_datas],
     hiddenimports=[
         *backend_submodules,
         # uvicorn internals
@@ -42,6 +46,10 @@ a = Analysis(
         "httpx",
         "PIL",
         "pyaxmlparser",
+        # OCR (bundled)
+        "rapidocr_onnxruntime",
+        "onnxruntime",
+        "cv2",
         # pydantic
         "pydantic",
         # email-validator (optional for pydantic)
@@ -54,7 +62,6 @@ a = Analysis(
         "tkinter",
         "matplotlib",
         "scipy",
-        "numpy",
         "pandas",
         "pytest",
     ],

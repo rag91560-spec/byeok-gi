@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("update-downloaded", handler)
     return () => ipcRenderer.removeListener("update-downloaded", handler)
   },
+  selectGameFolder: () => ipcRenderer.invoke("select-game-folder"),
   selectApkFile: () => ipcRenderer.invoke("select-apk-file"),
   selectApkFolder: () => ipcRenderer.invoke("select-apk-folder"),
   selectSubtitleFiles: () => ipcRenderer.invoke("select-subtitle-files"),
@@ -30,6 +31,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openHtmlGame: (opts) => ipcRenderer.invoke("open-html-game", opts),
   closeHtmlGame: (opts) => ipcRenderer.invoke("close-html-game", opts),
   showConfirm: (message) => ipcRenderer.invoke("show-confirm-dialog", message),
+  registerKillHotkey: (key) => ipcRenderer.invoke("register-kill-hotkey", key),
+  unregisterKillHotkey: () => ipcRenderer.invoke("unregister-kill-hotkey"),
 
   // Live Translation
   liveTranslation: {

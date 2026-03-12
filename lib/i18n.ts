@@ -51,6 +51,8 @@ export const translations = {
     apiKeys: "API 키",
     apiKeysDescription: "AI 번역에 사용할 API 키를 설정하세요. 무료 크레딧이 있는 제공자도 있습니다.",
     getKey: "키 발급",
+    testConnection: "연결 테스트",
+    connectionSuccess: "연결 성공",
     guide: "가이드",
     scanDirectories: "게임 폴더 스캔 경로",
     scanDirectoriesDescription: "게임이 설치된 루트 폴더를 설정하면 자동 스캔할 수 있습니다",
@@ -412,6 +414,11 @@ export const translations = {
     subtitleImportSuccess: "자막 파일을 가져왔습니다",
     // Live Translation
     liveTranslation: "라이브 번역",
+    liveTranslationDesc: "실시간 화면 캡처 + OCR + AI 번역. 모든 게임에서 사용 가능합니다.",
+    liveElectronOnly: "라이브 번역은 데스크톱 앱에서만 사용할 수 있습니다. Electron 환경에서 실행해주세요.",
+    lastCapture: "마지막 캡처",
+    fullscreenWarning: "전체화면(Exclusive Fullscreen) 게임에서는 오버레이가 표시되지 않습니다. \"보더리스 윈도우\" 모드를 사용해주세요.",
+    ocrLanguagePackNotice: "일본어/중국어 OCR 사용 시 Windows 설정 → 시간 및 언어 → 언어에서 해당 언어 팩이 설치되어 있어야 합니다.",
     // Videos
     videos: "영상",
     addVideo: "영상 추가",
@@ -482,6 +489,13 @@ export const translations = {
     mangaEmpty: "스크랩한 작품이 없습니다",
     mangaScrapeFirst: "첫 작품 스크랩하기",
     mangaConfirmDelete: "이 작품을 삭제하시겠습니까?",
+    // Shortcuts
+    shortcuts: "단축키",
+    killHotkey: "강제 종료 단축키",
+    killHotkeyDescription: "실행 중인 게임과 런처를 한 번에 종료합니다",
+    pressKeys: "키를 입력하세요...",
+    hotkeyRegistered: "단축키 등록됨",
+    hotkeyRegisterFailed: "단축키 등록 실패",
     // Paywall
     paywallTitle: "구독이 필요합니다",
     paywallDesc: "번역 기능을 사용하려면 Fanbox에서 구독해주세요.",
@@ -541,6 +555,8 @@ export const translations = {
     apiKeys: "API Keys",
     apiKeysDescription: "Set up API keys for AI translation. Some providers offer free credits.",
     getKey: "Get Key",
+    testConnection: "Test Connection",
+    connectionSuccess: "Connected",
     guide: "Guide",
     scanDirectories: "Game Folder Scan Paths",
     scanDirectoriesDescription: "Set root folders where games are installed for auto-scanning",
@@ -902,6 +918,11 @@ export const translations = {
     subtitleImportSuccess: "Subtitle files imported",
     // Live Translation
     liveTranslation: "Live Translation",
+    liveTranslationDesc: "Real-time screen capture + OCR + AI translation. Works with any game.",
+    liveElectronOnly: "Live translation is only available in the desktop app. Please run in Electron.",
+    lastCapture: "Last Capture",
+    fullscreenWarning: "Overlay is not displayed in Exclusive Fullscreen games. Use \"Borderless Window\" mode.",
+    ocrLanguagePackNotice: "For Japanese/Chinese OCR, the corresponding language pack must be installed in Windows Settings → Time & Language → Language.",
     // Videos
     videos: "Videos",
     addVideo: "Add Video",
@@ -972,6 +993,13 @@ export const translations = {
     mangaEmpty: "No scraped works yet",
     mangaScrapeFirst: "Scrape your first work",
     mangaConfirmDelete: "Delete this work?",
+    // Shortcuts
+    shortcuts: "Shortcuts",
+    killHotkey: "Force Quit Hotkey",
+    killHotkeyDescription: "Terminate running game and launcher at once",
+    pressKeys: "Press keys...",
+    hotkeyRegistered: "Hotkey registered",
+    hotkeyRegisterFailed: "Hotkey registration failed",
     // Paywall
     paywallTitle: "Subscription Required",
     paywallDesc: "Subscribe on Fanbox to unlock translation features.",
