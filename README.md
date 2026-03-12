@@ -2,7 +2,7 @@
 
 AI 기반 게임 번역 도구. 게임 파일을 자동으로 스캔하고, AI를 활용해 번역한 뒤, 원본에 적용합니다.
 
-[![Discord](https://img.shields.io/badge/Discord-참여하기-5865F2?logo=discord&logoColor=white)](https://discord.gg/MxkNZJdq)
+## [📢 디스코드 서버 참여하기](https://discord.gg/MxkNZJdq)
 
 <!-- ![Screenshot](docs/screenshot.png) -->
 
