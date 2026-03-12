@@ -6,6 +6,8 @@ import {
   FilmIcon,
   PlusIcon,
   XIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLocale } from "@/hooks/use-locale"
@@ -17,6 +19,7 @@ import { MediaGrid } from "@/components/media-grid/MediaGrid"
 import { MediaToolbar } from "@/components/media-grid/MediaToolbar"
 import { SelectionBar } from "@/components/media-grid/SelectionBar"
 import { AddMediaModal } from "@/components/media-grid/AddMediaModal"
+import { CategorySidebar } from "@/components/media-grid/CategorySidebar"
 import { StandaloneVideoPlayer } from "@/components/videos/StandaloneVideoPlayer"
 
 export default function VideosPage() {
@@ -29,6 +32,7 @@ export default function VideosPage() {
   const [search, setSearch] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [thumbnailTargetId, setThumbnailTargetId] = useState<number | null>(null)
   const thumbnailInputRef = useRef<HTMLInputElement>(null)
 
@@ -63,10 +67,6 @@ export default function VideosPage() {
   }, [videos, search, categoryFilter])
 
   const uncategorizedCount = useMemo(() => videos.filter((v) => !v.category_id).length, [videos])
-
-  const handleCategoryChange = (val: number | null) => {
-    setCategoryFilter(val)
-  }
 
   const handleDelete = async (id: number) => {
     if (!await appConfirm(t("confirmDeleteVideo"))) return
@@ -107,13 +107,35 @@ export default function VideosPage() {
         ids.includes(v.id) ? { ...v, category_id: categoryId } : v
       ))
       setSelectedIds(new Set())
-      // Refresh categories to update counts
       api.categories.list("video").then(setCategories).catch(() => {})
     } catch {}
   }
 
   const handleCategoriesRefresh = () => {
     api.categories.list("video").then(setCategories).catch(() => {})
+  }
+
+  const handleCreateCategory = async (name: string) => {
+    try {
+      await api.categories.create({ name, media_type: "video" })
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleRenameCategory = async (id: number, name: string) => {
+    try {
+      await api.categories.update(id, { name })
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleDeleteCategory = async (id: number) => {
+    if (!await appConfirm(t("confirmDeleteCategory"))) return
+    try {
+      await api.categories.delete(id)
+      if (categoryFilter === id) setCategoryFilter(null)
+      handleCategoriesRefresh()
+    } catch {}
   }
 
   const handleChangeThumbnail = (id: number) => {
@@ -141,70 +163,90 @@ export default function VideosPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 p-4 gap-4">
-      {/* Toolbar */}
-      <MediaToolbar
-        search={search}
-        onSearchChange={setSearch}
+    <div className="flex-1 flex min-h-0">
+      {/* Sidebar */}
+      <CategorySidebar
         categories={categories}
-        selectedCategoryId={categoryFilter}
-        onCategoryChange={handleCategoryChange}
-        onAdd={() => setShowAddModal(true)}
-        mediaType="video"
-        onCategoriesChange={handleCategoriesRefresh}
+        activeCategory={categoryFilter}
+        onSelect={setCategoryFilter}
         totalCount={videos.length}
         uncategorizedCount={uncategorizedCount}
+        onCreateCategory={handleCreateCategory}
+        onRenameCategory={handleRenameCategory}
+        onDeleteCategory={handleDeleteCategory}
+        collapsed={sidebarCollapsed}
+        t={t}
       />
 
-      {/* Selection bar */}
-      {selectedIds.size > 0 && (
-        <SelectionBar
-          selectedCount={selectedIds.size}
-          categories={categories}
-          onBulkMove={handleBulkMove}
-          onDeselectAll={() => setSelectedIds(new Set())}
-        />
-      )}
+      {/* Content */}
+      <div className="flex-1 flex flex-col min-h-0 p-4 gap-4">
+        {/* Toolbar row */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-overlay-4 transition-colors shrink-0"
+            title={sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")}
+          >
+            {sidebarCollapsed ? <ChevronRightIcon className="size-4" /> : <ChevronLeftIcon className="size-4" />}
+          </button>
+          <MediaToolbar
+            search={search}
+            onSearchChange={setSearch}
+            onAdd={() => setShowAddModal(true)}
+            mediaType="video"
+          />
+        </div>
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-            <FilmIcon className="size-12 text-text-tertiary opacity-30" />
-            <p className="text-sm text-text-secondary">
-              {videos.length === 0 ? t("noVideos") : t("noResults") || "No results"}
-            </p>
-            {videos.length === 0 && (
-              <Button variant="secondary" size="sm" onClick={() => setShowAddModal(true)}>
-                <PlusIcon className="size-4" />
-                {t("addFirstVideo")}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <MediaGrid>
-            {filtered.map((video) => (
-              <MediaCard
-                key={video.id}
-                title={video.title}
-                thumbnail={video.thumbnail || undefined}
-                mediaType="video"
-                duration={video.duration}
-                size={video.size}
-                categoryId={video.category_id}
-                categories={categories}
-                isActive={playingVideo?.id === video.id}
-                selectable
-                selected={selectedIds.has(video.id)}
-                onSelect={(checked) => handleSelect(video.id, checked)}
-                onClick={() => setPlayingVideo(video)}
-                onDelete={() => handleDelete(video.id)}
-                onChangeThumbnail={() => handleChangeThumbnail(video.id)}
-                onMoveToCategory={(catId) => handleMoveToCategory(video.id, catId)}
-              />
-            ))}
-          </MediaGrid>
+        {/* Selection bar */}
+        {selectedIds.size > 0 && (
+          <SelectionBar
+            selectedCount={selectedIds.size}
+            categories={categories}
+            onBulkMove={handleBulkMove}
+            onDeselectAll={() => setSelectedIds(new Set())}
+          />
         )}
+
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+              <FilmIcon className="size-12 text-text-tertiary opacity-30" />
+              <p className="text-sm text-text-secondary">
+                {videos.length === 0 ? t("noVideos") : t("noResults") || "No results"}
+              </p>
+              {videos.length === 0 && (
+                <Button variant="secondary" size="sm" onClick={() => setShowAddModal(true)}>
+                  <PlusIcon className="size-4" />
+                  {t("addFirstVideo")}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <MediaGrid>
+              {filtered.map((video) => (
+                <MediaCard
+                  key={video.id}
+                  title={video.title}
+                  thumbnail={video.thumbnail || undefined}
+                  mediaType="video"
+                  duration={video.duration}
+                  size={video.size}
+                  categoryId={video.category_id}
+                  categories={categories}
+                  isActive={playingVideo?.id === video.id}
+                  selectable
+                  selected={selectedIds.has(video.id)}
+                  onSelect={(checked) => handleSelect(video.id, checked)}
+                  onClick={() => setPlayingVideo(video)}
+                  onDelete={() => handleDelete(video.id)}
+                  onChangeThumbnail={() => handleChangeThumbnail(video.id)}
+                  onMoveToCategory={(catId) => handleMoveToCategory(video.id, catId)}
+                />
+              ))}
+            </MediaGrid>
+          )}
+        </div>
       </div>
 
       {/* Hidden file input for thumbnail change */}
