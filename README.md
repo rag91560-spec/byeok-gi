@@ -67,8 +67,8 @@ npm run electron:build
 - **NLLB** — Meta의 오픈소스 번역 모델. 라이선스 키 없이 로컬에서 무료 사용 가능
 
 ### 유료 (라이선스 필요)
-- **Claude, OpenAI, Gemini** 등 고품질 AI 번역 엔진
-- 서버 측 라이선스 검증을 통해 제공
+- **Claude, OpenAI, Gemini** 등 빅테크 AI를 활용한 고품질 게임 번역 엔진
+- 17종 엔진 대응 AI 번역 로직은 한 달 넘게 개발한 부분으로, 유료 라이선스를 통해 제공됩니다
 - 라이선스 키 구매: [Pixiv Fanbox](https://rag91560.fanbox.cc/)
 
 ## 프로젝트 구조
