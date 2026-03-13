@@ -108,6 +108,14 @@ export const PROVIDERS: ProviderInfo[] = [
   },
 ]
 
+/** Provider IDs that work offline without license */
+export const OFFLINE_PROVIDER_IDS = ["offline", "test"] as const
+
+/** AI providers (excludes disabled/offline/test) */
+export const AI_PROVIDERS = PROVIDERS.filter(
+  (p) => !p.disabled && !(OFFLINE_PROVIDER_IDS as readonly string[]).includes(p.id),
+)
+
 /** Get provider by id */
 export function getProvider(id: string): ProviderInfo | undefined {
   return PROVIDERS.find((p) => p.id === id)
