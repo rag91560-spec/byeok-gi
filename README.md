@@ -69,7 +69,7 @@ npm run electron:build
 ### 유료 (라이선스 필요)
 - **Claude, OpenAI, Gemini** 등 빅테크 AI를 활용한 고품질 게임 번역 엔진
 - 17종 엔진 대응 AI 번역 로직은 한 달 넘게 개발한 부분으로, 유료 라이선스를 통해 제공됩니다
-- 라이선스 키 구매: [Pixiv Fanbox](https://rag91560.fanbox.cc/)
+- 라이선스 관련 문의는 [디스코드 서버](https://discord.gg/MxkNZJdq)로 부탁드립니다
 
 ## 프로젝트 구조
 

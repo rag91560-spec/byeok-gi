@@ -7,15 +7,20 @@ import {
   CheckCircleIcon,
   RotateCcwIcon,
   DatabaseIcon,
+  LockIcon,
+  WifiOffIcon,
+  SparklesIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLocale } from "@/hooks/use-locale"
 import { api } from "@/lib/api"
-import { PROVIDERS, getProvider } from "@/lib/providers"
+import { AI_PROVIDERS, OFFLINE_PROVIDER_IDS, getProvider } from "@/lib/providers"
 import { Paywall } from "@/components/ui/paywall"
 import { ChipButton } from "./ChipButton"
 import type { Game, TranslationPreset } from "@/lib/types"
 import type { TranslationProgress } from "@/lib/types"
+
+type TabMode = "offline" | "ai"
 
 interface TranslationPanelProps {
   game: Game
@@ -46,8 +51,9 @@ export function TranslationPanel({
 }: TranslationPanelProps) {
   const { t } = useLocale()
 
-  const [provider, setProvider] = useState("claude_oauth")
-  const [selectedModel, setSelectedModel] = useState("")
+  const [tab, setTab] = useState<TabMode>(license.valid ? "ai" : "offline")
+  const [provider, setProvider] = useState(license.valid ? "claude_oauth" : "offline")
+  const [selectedModel, setSelectedModel] = useState(license.valid ? "" : "nllb-600m-game-v1")
   const [presets, setPresets] = useState<TranslationPreset[]>([])
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null)
   const [applying, setApplying] = useState(false)
@@ -55,6 +61,18 @@ export function TranslationPanel({
 
   useEffect(() => {
     api.presets.list().then(setPresets).catch((e) => console.error("Failed to load presets:", e))
+  }, [])
+
+  // Switch tab → update provider/model
+  const handleTabChange = useCallback((newTab: TabMode) => {
+    setTab(newTab)
+    if (newTab === "offline") {
+      setProvider("offline")
+      setSelectedModel("nllb-600m-game-v1")
+    } else {
+      setProvider("claude_oauth")
+      setSelectedModel("")
+    }
   }, [])
 
   const handleTranslate = useCallback(() => {
@@ -92,118 +110,207 @@ export function TranslationPanel({
   }, [gameId, t])
 
   return (
-    <Paywall show={!license.valid} onLicenseVerified={onLicenseRefresh}>
     <div className="rounded-lg p-5 bg-overlay-2 border border-overlay-6">
       <div className="flex items-center gap-2 mb-4">
         <LanguagesIcon className="size-5 text-accent" />
         <h2 className="text-base font-semibold text-text-primary">{t("translationProgress")}</h2>
       </div>
 
-      {/* Provider selector */}
-      <div className="mb-4">
-        <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
-          {t("aiProvider")}
-        </label>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
-          {PROVIDERS.filter((p) => !p.disabled).map((p) => (
-            <ChipButton
-              key={p.id}
-              selected={provider === p.id}
-              onClick={() => { setProvider(p.id); setSelectedModel(p.defaultModel) }}
-              className="py-2 text-center"
-            >
-              {p.name}
-            </ChipButton>
-          ))}
-        </div>
+      {/* Tab buttons */}
+      <div className="flex gap-1.5 mb-4">
+        <button
+          onClick={() => handleTabChange("offline")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === "offline"
+              ? "bg-accent text-white"
+              : "bg-overlay-4 text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <WifiOffIcon className="size-3.5" />
+          {t("offlineTranslation")}
+        </button>
+        <button
+          onClick={() => handleTabChange("ai")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === "ai"
+              ? "bg-accent text-white"
+              : "bg-overlay-4 text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <SparklesIcon className="size-3.5" />
+          {t("aiTranslation")}
+          {!license.valid && <LockIcon className="size-3" />}
+        </button>
       </div>
 
-      {/* Model selector */}
-      {(() => {
-        const prov = getProvider(provider)
-        return prov && prov.models.length > 1 ? (
+      {/* Offline tab */}
+      {tab === "offline" && (
+        <>
+          {/* Fixed offline model display */}
           <div className="mb-4">
             <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
               {t("model")}
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {prov.models.map((m) => (
+              <ChipButton selected onClick={() => {}} className="font-mono text-[11px]">
+                nllb-600m-game-v1
+              </ChipButton>
+            </div>
+          </div>
+
+          {/* Preset selector */}
+          {presets.length > 0 && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
+                {t("presetLabel")}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
                 <ChipButton
-                  key={m}
-                  selected={selectedModel === m}
-                  onClick={() => setSelectedModel(m)}
-                  className="font-mono text-[11px]"
+                  selected={!selectedPresetId}
+                  onClick={() => setSelectedPresetId(null)}
                 >
-                  {m}
+                  {t("none")}
+                </ChipButton>
+                {presets.map((p) => (
+                  <ChipButton
+                    key={p.id}
+                    selected={selectedPresetId === p.id}
+                    onClick={() => setSelectedPresetId(p.id)}
+                  >
+                    {p.name}
+                  </ChipButton>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Start / Cancel */}
+          <div className="flex flex-wrap gap-2">
+            {isTranslating ? (
+              <Button variant="secondary" size="sm" onClick={onCancel} className="flex-1">
+                <XCircleIcon className="size-4" /> {t("cancelTranslation")}
+              </Button>
+            ) : (
+              <Button variant="default" size="sm" onClick={handleTranslate} disabled={!game.engine} className="flex-1">
+                <LanguagesIcon className="size-4" /> {t("startTranslation")}
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* AI tab — wrapped in Paywall */}
+      {tab === "ai" && (
+        <Paywall show={!license.valid} onLicenseVerified={onLicenseRefresh}>
+          {/* Provider selector (AI only) */}
+          <div className="mb-4">
+            <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
+              {t("aiProvider")}
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+              {AI_PROVIDERS.map((p) => (
+                <ChipButton
+                  key={p.id}
+                  selected={provider === p.id}
+                  onClick={() => { setProvider(p.id); setSelectedModel(p.defaultModel) }}
+                  className="py-2 text-center"
+                >
+                  {p.name}
                 </ChipButton>
               ))}
             </div>
           </div>
-        ) : null
-      })()}
 
-      {/* Preset selector */}
-      {presets.length > 0 && (
-        <div className="mb-4">
-          <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
-            {t("presetLabel")}
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            <ChipButton
-              selected={!selectedPresetId}
-              onClick={() => setSelectedPresetId(null)}
-            >
-              {t("none")}
-            </ChipButton>
-            {presets.map((p) => (
-              <ChipButton
-                key={p.id}
-                selected={selectedPresetId === p.id}
-                onClick={() => setSelectedPresetId(p.id)}
-              >
-                {p.name}
-              </ChipButton>
-            ))}
+          {/* Model selector */}
+          {(() => {
+            const prov = getProvider(provider)
+            return prov && prov.models.length > 1 ? (
+              <div className="mb-4">
+                <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
+                  {t("model")}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {prov.models.map((m) => (
+                    <ChipButton
+                      key={m}
+                      selected={selectedModel === m}
+                      onClick={() => setSelectedModel(m)}
+                      className="font-mono text-[11px]"
+                    >
+                      {m}
+                    </ChipButton>
+                  ))}
+                </div>
+              </div>
+            ) : null
+          })()}
+
+          {/* Preset selector */}
+          {presets.length > 0 && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">
+                {t("presetLabel")}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <ChipButton
+                  selected={!selectedPresetId}
+                  onClick={() => setSelectedPresetId(null)}
+                >
+                  {t("none")}
+                </ChipButton>
+                {presets.map((p) => (
+                  <ChipButton
+                    key={p.id}
+                    selected={selectedPresetId === p.id}
+                    onClick={() => setSelectedPresetId(p.id)}
+                  >
+                    {p.name}
+                  </ChipButton>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Start / Cancel */}
+          <div className="flex flex-wrap gap-2">
+            {isTranslating ? (
+              <Button variant="secondary" size="sm" onClick={onCancel} className="flex-1">
+                <XCircleIcon className="size-4" /> {t("cancelTranslation")}
+              </Button>
+            ) : (
+              <Button variant="default" size="sm" onClick={handleTranslate} disabled={!game.engine} className="flex-1">
+                <LanguagesIcon className="size-4" /> {t("startTranslation")}
+              </Button>
+            )}
           </div>
-        </div>
+        </Paywall>
       )}
 
       {/* TM import notification */}
       {tmNotification && (
-        <div className="mb-3 flex items-center gap-2 text-xs text-accent bg-accent/10 rounded-md px-3 py-2">
+        <div className="mt-3 flex items-center gap-2 text-xs text-accent bg-accent/10 rounded-md px-3 py-2">
           <CheckCircleIcon className="size-3.5" />
           <span className="flex-1">{tmNotification}</span>
           <button onClick={() => setTmNotification("")} className="shrink-0 text-accent/60 hover:text-accent">&times;</button>
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="flex flex-wrap gap-2">
-        {isTranslating ? (
-          <Button variant="secondary" size="sm" onClick={onCancel} className="flex-1">
-            <XCircleIcon className="size-4" /> {t("cancelTranslation")}
+      {/* Action buttons — always accessible outside tabs */}
+      {game.translated_count > 0 && !isTranslating && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          <Button variant="accent" size="sm" onClick={handleApply} loading={applying}>
+            <CheckCircleIcon className="size-4" /> {t("apply")}
           </Button>
-        ) : (
-          <Button variant="default" size="sm" onClick={handleTranslate} disabled={!game.engine} className="flex-1">
-            <LanguagesIcon className="size-4" /> {t("startTranslation")}
+          <Button variant="ghost" size="sm" onClick={handleImportTM}>
+            <DatabaseIcon className="size-4" /> {t("tmSave")}
           </Button>
-        )}
-        {game.translated_count > 0 && !isTranslating && (
-          <>
-            <Button variant="accent" size="sm" onClick={handleApply} loading={applying}>
-              <CheckCircleIcon className="size-4" /> {t("apply")}
+          {game.status === "applied" && (
+            <Button variant="ghost" size="sm" onClick={handleRollback}>
+              <RotateCcwIcon className="size-4" /> {t("rollback")}
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleImportTM}>
-              <DatabaseIcon className="size-4" /> {t("tmSave")}
-            </Button>
-            {game.status === "applied" && (
-              <Button variant="ghost" size="sm" onClick={handleRollback}>
-                <RotateCcwIcon className="size-4" /> {t("rollback")}
-              </Button>
-            )}
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {!game.engine && (
         <p className="mt-3 text-xs text-text-tertiary">
@@ -216,6 +323,5 @@ export function TranslationPanel({
         </p>
       )}
     </div>
-    </Paywall>
   )
 }
