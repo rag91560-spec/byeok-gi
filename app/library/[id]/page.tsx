@@ -107,6 +107,13 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [txStatus, refresh])
 
+  // Auto-reconnect: 페이지 복귀 시 번역 중이면 자동으로 폴링 재연결
+  useEffect(() => {
+    if (game?.status === "translating" && txStatus === "idle") {
+      connect()
+    }
+  }, [game?.status, txStatus, connect])
+
   const [scanning, setScanning] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -233,7 +240,7 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
 
   const pct = getProgressPct(game)
   const { text: statusText, color: statusColor } = getStatusInfo(game, t)
-  const isTranslating = startingTranslation || txStatus === "running" || txStatus === "connecting"
+  const isTranslating = startingTranslation || txStatus === "running" || txStatus === "connecting" || game?.status === "translating"
 
   return (
     <div className="max-w-4xl mx-auto pb-8">
