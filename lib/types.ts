@@ -22,6 +22,14 @@ export interface Game {
   package_name: string
   original_path: string
   variant_lang: string
+  folder_id: number | null
+}
+
+export interface GameFolder {
+  id: number
+  name: string
+  sort_order: number
+  created_at: string
 }
 
 export interface TranslateRequest {
@@ -100,6 +108,7 @@ export interface TranslationProgress {
   current_index?: number
   current_original?: string
   current_translated?: string
+  dedup_stats?: DedupStats
 }
 
 export interface LaunchResult {
@@ -247,6 +256,7 @@ export interface TranslationEntry {
   namespace?: string
   tag?: string
   context?: string
+  safety?: "safe" | "risky" | "unsafe"
   review_status?: string
   reviewer_note?: string
   edited_at?: string
@@ -257,6 +267,17 @@ export interface TranslationStringsResponse {
   total: number
   page: number
   per_page: number
+  safety_counts?: { safe: number; risky: number; unsafe: number }
+}
+
+export interface DedupStats {
+  total_strings: number
+  unique_strings: number
+  exact_dedup: number
+  fuzzy_dedup: number
+  tm_hits: number
+  api_calls: number
+  saved_pct: number
 }
 
 // --- Glossary ---
@@ -343,7 +364,7 @@ export interface AudioItem {
 export interface MediaCategory {
   id: number
   name: string
-  media_type: "video" | "audio"
+  media_type: "video" | "audio" | "manga"
   sort_order: number
   item_count?: number
   created_at: string
@@ -356,23 +377,16 @@ export interface MangaItem {
   id: number
   title: string
   source_url: string
-  source_type: "hitomi" | "arca" | "manual"
+  source_type: "manual"
   artist: string
   tags: string
   page_count: number
   thumbnail_path: string
+  category_id: number | null
+  translated_pages?: number
   created_at: string
   updated_at: string
   images?: string[]
-}
-
-export interface MangaScrapeStatus {
-  status: "started" | "extracting" | "downloading" | "completed" | "error" | "exists" | "unknown"
-  progress: number
-  total: number
-  manga_id: number | null
-  error: string | null
-  manga?: MangaItem
 }
 
 export interface MangaTranslationEntry {
@@ -392,6 +406,64 @@ export interface MangaTranslationResult {
     translated_text: string
     positions: MangaTranslationEntry[]
   }
+}
+
+// --- Subtitles ---
+
+export interface SubtitleSet {
+  id: number
+  media_id: number
+  media_type: "video" | "audio"
+  label: string
+  source_lang: string
+  target_lang: string
+  stt_provider: string
+  stt_model: string
+  status: "pending" | "transcribing" | "transcribed" | "translating" | "translated" | "error"
+  duration: number
+  segment_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SubtitleSegment {
+  id: number
+  subtitle_id: number
+  seq: number
+  start_time: number
+  end_time: number
+  original_text: string
+  translated_text: string
+  confidence: number
+  edited: number
+}
+
+export interface SubtitleJobStatus {
+  job_id: string
+  status: string
+  progress: number
+  error_message?: string
+}
+
+export interface SubtitleExportOptions {
+  format: "srt" | "vtt" | "ass"
+  use_translated: boolean
+  font_name?: string
+  font_size?: number
+  primary_color?: string
+  outline_color?: string
+  alignment?: number
+  margin_v?: number
+}
+
+export interface SubtitleStyleOptions {
+  font_name: string
+  font_size: number
+  primary_color: string       // ASS &HAABBGGRR format
+  outline_color: string
+  outline_width: number       // 0-8, 0 = no outline
+  alignment: number           // numpad: 2=bottom, 8=top, 5=center
+  margin_v: number
 }
 
 // --- Export/Import ---
@@ -538,6 +610,42 @@ export interface ElectronAPI {
   registerKillHotkey: (key: string) => Promise<boolean>
   unregisterKillHotkey: () => Promise<void>
   liveTranslation: LiveTranslationAPI
+}
+
+// --- Agent ---
+
+export interface AgentMessage {
+  event: "thinking" | "text" | "tool_call" | "tool_result" | "tokens" | "complete" | "error" | "cancelled" | "started" | "init" | "heartbeat" | "waiting" | "user_message"
+  data: Record<string, unknown>
+}
+
+export interface AgentSession {
+  id: string
+  game_id: number
+  status: "running" | "waiting" | "completed" | "error" | "cancelled" | "idle"
+  model: string
+  turns: number
+  max_turns: number
+  input_tokens: number
+  output_tokens: number
+  result_summary: string
+  error_message: string
+  messages: AgentMessage[]
+  created_at?: string
+  completed_at?: string
+}
+
+export interface AgentPollResponse {
+  job_id?: string
+  status: string
+  model?: string
+  turns?: number
+  max_turns?: number
+  input_tokens?: number
+  output_tokens?: number
+  result_summary?: string
+  error_message?: string
+  messages?: AgentMessage[]
 }
 
 declare global {
