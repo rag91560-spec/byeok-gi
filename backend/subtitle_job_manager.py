@@ -1061,3 +1061,233 @@ def _run_hardsub(job: SubtitleJob, segments: list[dict],
                 os.unlink(tmp_ass)
             except OSError:
                 pass
+
+
+# --- Auto-Caption (STT + Translation → Spotify-style lyrics) ---
+
+
+async def start_auto_caption(audio_id: int, audio_path: str,
+                              provider: str, api_key: str, model: str,
+                              source_lang: str = "ja", target_lang: str = "ko",
+                              stt_provider: str = "whisper_api",
+                              stt_api_key: str = "") -> SubtitleJob:
+    """STT + Translation pipeline for audio → saves SRT + translated JSON to audio item."""
+    job_id = str(uuid.uuid4())
+    job = SubtitleJob(job_id, subtitle_id=-1, media_id=audio_id, media_type="audio", job_type="auto_caption")
+    job._loop = asyncio.get_event_loop()
+
+    with _jobs_lock:
+        _cleanup_finished()
+        _jobs[job_id] = job
+
+    thread = threading.Thread(
+        target=_run_auto_caption,
+        args=(job, audio_id, audio_path, provider, api_key, model,
+              source_lang, target_lang, stt_provider, stt_api_key),
+        daemon=True,
+    )
+    thread.start()
+    return job
+
+
+def _segments_to_srt(segments: list[dict], use_translated: bool = False) -> str:
+    """Convert segment dicts to SRT format string."""
+    def fmt(secs: float) -> str:
+        h = int(secs // 3600)
+        m = int((secs % 3600) // 60)
+        s = int(secs % 60)
+        ms = int(round((secs % 1) * 1000))
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        text = seg.get("translated_text" if use_translated else "original_text", "").strip()
+        if not text:
+            continue
+        lines.append(str(i))
+        lines.append(f"{fmt(seg['start_time'])} --> {fmt(seg['end_time'])}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _run_auto_caption(job: SubtitleJob, audio_id: int, audio_path: str,
+                       provider: str, api_key: str, model: str,
+                       source_lang: str, target_lang: str,
+                       stt_provider: str, stt_api_key: str):
+    """Run STT + translate in background, save Spotify-style lyrics to audio item."""
+    loop = job._loop
+    wav_path = None
+    try:
+        # Step 1: Extract WAV
+        job.broadcast("progress", {"progress": 0.02, "message": "오디오 추출 중..."})
+        wav_path = audio_path + "_autocaption.wav"
+        extract_audio(audio_path, wav_path)
+
+        if job.cancel_event.is_set():
+            raise InterruptedError("Cancelled")
+
+        # Step 2: STT
+        job.broadcast("progress", {"progress": 0.05, "message": "음성 인식 중 (Whisper)..."})
+
+        if stt_provider == "whisper_api":
+            engine = WhisperAPIEngine(api_key=stt_api_key, model="whisper-1")
+        else:
+            engine = WhisperLocalEngine(model_size=model or "base")
+
+        def stt_progress(pct: float, msg: str):
+            if job.cancel_event.is_set():
+                raise InterruptedError("Cancelled")
+            scaled = 0.05 + pct * 0.40  # 5% → 45%
+            job.progress = scaled
+            job.broadcast("progress", {"progress": scaled, "message": msg})
+
+        stt_result: STTResult = engine.transcribe(wav_path, language=source_lang if source_lang != "auto" else "", progress_cb=stt_progress)
+
+        if job.cancel_event.is_set():
+            raise InterruptedError("Cancelled")
+
+        segments = [
+            {
+                "seq": i,
+                "start_time": seg.start,
+                "end_time": seg.end,
+                "original_text": seg.text,
+                "translated_text": "",
+                "confidence": seg.confidence,
+            }
+            for i, seg in enumerate(stt_result.segments)
+        ]
+        detected_lang = stt_result.language or source_lang
+
+        if not segments:
+            raise ValueError("음성 인식 결과가 없습니다")
+
+        job.broadcast("progress", {"progress": 0.46, "message": f"음성 인식 완료 ({len(segments)}개 대사), 번역 시작..."})
+
+        # Step 3: Translation
+        audio_contexts = analyze_audio_context(segments)
+        translator = engine_bridge.create_translator(
+            provider=provider, api_key=api_key, model=model, source_lang=detected_lang,
+        )
+
+        # Load fallback chain from settings
+        settings = asyncio.run_coroutine_threadsafe(
+            db.get_settings(), loop
+        ).result(timeout=10)
+        api_keys = settings.get("api_keys", {})
+        if isinstance(api_keys, str):
+            try:
+                api_keys = json.loads(api_keys)
+            except Exception:
+                api_keys = {}
+        fallback_list = settings.get("fallback_providers", [])
+        if isinstance(fallback_list, str):
+            try:
+                fallback_list = json.loads(fallback_list)
+            except Exception:
+                fallback_list = []
+        fallback_configs = [
+            {"provider": p, "api_key": api_keys[p]}
+            for p in fallback_list
+            if p != provider and api_keys.get(p)
+        ]
+        if fallback_configs:
+            translator = engine_bridge.FallbackTranslator(translator, fallback_configs)
+
+        system_prompt = build_subtitle_system_prompt(detected_lang, context="")
+        texts = [seg["original_text"] for seg in segments]
+        need_indices = list(range(len(segments)))
+
+        # TM cache lookup
+        tm_results = asyncio.run_coroutine_threadsafe(
+            db.tm_lookup_batch(texts, detected_lang, target_lang), loop,
+        ).result(timeout=30)
+        translated = [""] * len(segments)
+        need_translate_indices = []
+        for i, text in enumerate(texts):
+            if text in tm_results:
+                translated[i] = tm_results[text]["translated_text"]
+            else:
+                need_translate_indices.append(i)
+
+        batches = _create_context_batches(texts, need_translate_indices, window_size=20, overlap=5, translated=translated)
+        done = 0
+        for batch_texts, batch_indices, context_count in batches:
+            if job.cancel_event.is_set():
+                raise InterruptedError("Cancelled")
+            context_lines = batch_texts[:context_count] if context_count > 0 else None
+            actual_texts = batch_texts[context_count:] if context_count > 0 else batch_texts
+            seg_meta = []
+            for idx in batch_indices:
+                ctx = audio_contexts[idx]
+                seg = segments[idx]
+                seg_meta.append({
+                    "start": format_timestamp(seg["start_time"]),
+                    "end": format_timestamp(seg["end_time"]),
+                    "marker": ctx.marker,
+                })
+            results = _translate_batch_with_splitting(
+                translator, actual_texts, system_prompt,
+                detected_lang, target_lang, context_lines, seg_meta,
+            )
+            for idx, trans in zip(batch_indices, results):
+                if trans and trans.strip():
+                    translated[idx] = trans.strip()
+            done += len(batch_indices)
+            pct = 0.46 + 0.46 * (done / max(len(need_translate_indices), 1))
+            job.progress = pct
+            job.broadcast("progress", {"progress": pct, "translated": done, "total": len(need_translate_indices)})
+
+        # Quality retry
+        failed = [i for i in need_translate_indices if translated[i] and _validate_translation(texts[i], translated[i], detected_lang)]
+        if failed:
+            translated = _retry_failed_segments(translator, failed, texts, translated, system_prompt, detected_lang, target_lang)
+
+        # TM save
+        tm_entries = [
+            {"source_text": texts[i], "translated_text": translated[i],
+             "source_lang": detected_lang, "target_lang": target_lang,
+             "provider": provider, "model": model, "context_tag": "audio_caption"}
+            for i in need_translate_indices if translated[i]
+        ]
+        if tm_entries:
+            asyncio.run_coroutine_threadsafe(db.tm_insert_batch(tm_entries), loop).result(timeout=30)
+
+        # Apply translations to segments
+        for i, seg in enumerate(segments):
+            seg["translated_text"] = translated[i]
+
+        # Step 4: Convert to SRT + save
+        job.broadcast("progress", {"progress": 0.96, "message": "저장 중..."})
+        srt_text = _segments_to_srt(segments, use_translated=False)
+        translations_json = json.dumps([seg["translated_text"] for seg in segments], ensure_ascii=False)
+
+        asyncio.run_coroutine_threadsafe(
+            db.update_audio_item(audio_id, script_text=srt_text, translated_script=translations_json),
+            loop,
+        ).result(timeout=10)
+
+        job.status = "completed"
+        job.progress = 1.0
+        job.broadcast("complete", {
+            "segments": len(segments),
+            "language": detected_lang,
+        })
+
+    except InterruptedError:
+        job.status = "cancelled"
+        job.broadcast("cancelled", {})
+
+    except Exception as e:
+        logger.error("Auto-caption job failed: %s", e)
+        job.status = "error"
+        job.error_message = str(e)
+        job.broadcast("error", {"message": str(e)})
+
+    finally:
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
