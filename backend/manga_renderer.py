@@ -103,6 +103,7 @@ class TextRegion:
     polygon: list = field(default_factory=list)  # [[x1,y1], ...] optional
     text_color: str = ""   # hint from Gemini
     bg_type: str = ""      # solid | gradient | complex
+    type: str = "dialogue"  # dialogue | sfx | narration | title
 
 
 def get_font_path(font_id: str) -> Optional[str]:
@@ -669,24 +670,48 @@ def render_text_on_image(image: Image.Image, regions: list[TextRegion],
             except (ValueError, IndexError):
                 pass
 
+        # SFX type flag
+        is_sfx = getattr(region, "type", "dialogue") == "sfx"
+
         # Font size: scale naturally with bubble size (binary search finds what fits)
         # Cap at 52px to avoid oversized text; scale cap down for small bubbles
+        # SFX regions allow a larger cap since they float freely
         if config.font_size_override > 0:
             font_size = config.font_size_override
         else:
             smaller_dim = min(inner_w, inner_h)
-            manga_max = min(int(smaller_dim * 0.15), 36)
+            if is_sfx:
+                manga_max = min(int(smaller_dim * 0.25), 48)
+            else:
+                manga_max = min(int(smaller_dim * 0.15), 36)
             font_size = _calculate_font_size(
                 region.translated, inner_w, inner_h, direction, config.font_id,
                 max_size=max(manga_max, 10),
             )
 
         font = _get_font(config.font_id, font_size)
-        outline_w = config.outline_width if config.outline_enabled else 0
+        # SFX: no outline (SFX text has its own visual style)
+        outline_w = 0 if is_sfx else (config.outline_width if config.outline_enabled else 0)
+
+        # Polygon clipping: for non-SFX regions with polygon data, render text onto
+        # a temporary layer and composite only the pixels inside the polygon shape.
+        use_poly_clip = (
+            not is_sfx
+            and region.polygon
+            and len(region.polygon) >= 3
+        )
+
+        if use_poly_clip:
+            # Draw onto a temporary copy; we will mask it after rendering
+            text_layer = result.copy()
+            text_draw = ImageDraw.Draw(text_layer)
+        else:
+            text_layer = None
+            text_draw = draw
 
         if direction == "vertical":
             _render_vertical_text(
-                draw, inner_x, inner_y, inner_w, inner_h,
+                text_draw, inner_x, inner_y, inner_w, inner_h,
                 region.translated, font, font_size,
                 text_rgb, outline_rgb, outline_w,
             )
@@ -720,9 +745,18 @@ def render_text_on_image(image: Image.Image, regions: list[TextRegion],
                 lx = inner_x + max(0, (inner_w - line_w) // 2)
 
                 _draw_text_with_outline(
-                    draw, (lx, ly), line, font,
+                    text_draw, (lx, ly), line, font,
                     text_rgb, outline_rgb, outline_w,
                 )
+
+        # Apply polygon mask: composite text_layer onto result only inside polygon
+        if use_poly_clip and text_layer is not None:
+            poly_px = [(int(p[0] * w), int(p[1] * h)) for p in region.polygon]
+            poly_mask = Image.new("L", result.size, 0)
+            ImageDraw.Draw(poly_mask).polygon(poly_px, fill=255)
+            result.paste(text_layer, mask=poly_mask)
+            # Keep draw in sync with updated result
+            draw = ImageDraw.Draw(result)
 
     return result
 

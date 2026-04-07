@@ -16,6 +16,7 @@ import {
   FileTextIcon,
   LanguagesIcon,
   LoaderIcon,
+  SparklesIcon,
 } from "lucide-react"
 import type { AudioItem } from "@/lib/types"
 import { api } from "@/lib/api"
@@ -58,6 +59,10 @@ export function AudioFullscreenPlayer({
   const [editText, setEditText] = useState("")
   const [translating, setTranslating] = useState(false)
   const [translations, setTranslations] = useState<string[] | null>(null)
+  const [autoCaptioning, setAutoCaptioning] = useState(false)
+  const [autoCaptionProgress, setAutoCaptionProgress] = useState(0)
+  const [autoCaptionMsg, setAutoCaptionMsg] = useState("")
+  const autoCaptionEsRef = useRef<EventSource | null>(null)
 
   const currentIndex = playlist.findIndex((a) => a.id === track.id)
   const scriptData = useMemo(
@@ -172,6 +177,48 @@ export function AudioFullscreenPlayer({
     } catch {}
     setTranslating(false)
   }
+
+  const handleAutoCaption = async () => {
+    setAutoCaptioning(true)
+    setAutoCaptionProgress(0)
+    setAutoCaptionMsg("시작 중...")
+    try {
+      const { job_id } = await api.audio.autoCaption(track.id, { source_lang: "ja", target_lang: "ko" })
+      const es = new EventSource(api.audio.autoCaptionStatusUrl(job_id))
+      autoCaptionEsRef.current = es
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.event === "progress") {
+            setAutoCaptionProgress(msg.data?.progress ?? 0)
+            setAutoCaptionMsg(msg.data?.message ?? "")
+          } else if (msg.event === "complete") {
+            es.close()
+            autoCaptionEsRef.current = null
+            setAutoCaptioning(false)
+            if (msg.data?.item) onTrackUpdate(msg.data.item)
+          } else if (msg.event === "error") {
+            es.close()
+            autoCaptionEsRef.current = null
+            setAutoCaptioning(false)
+            setAutoCaptionMsg(msg.data?.error ?? "오류 발생")
+          }
+        } catch {}
+      }
+      es.onerror = () => {
+        es.close()
+        autoCaptionEsRef.current = null
+        setAutoCaptioning(false)
+      }
+    } catch {
+      setAutoCaptioning(false)
+    }
+  }
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { autoCaptionEsRef.current?.close() }
+  }, [])
 
   const thumbnailUrl = track.thumbnail || null
 
@@ -315,24 +362,47 @@ export function AudioFullscreenPlayer({
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
-              <FileTextIcon className="size-10 text-text-tertiary opacity-40" />
-              <p className="text-sm text-text-tertiary">{t("noScript")}</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs bg-overlay-6 text-text-secondary hover:text-text-primary rounded-lg transition-colors"
-                >
-                  <UploadIcon className="size-3.5" />
-                  {t("uploadScriptFile")}
-                </button>
-                <button
-                  onClick={() => { setEditText(""); setScriptMode("edit") }}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs bg-overlay-6 text-text-secondary hover:text-text-primary rounded-lg transition-colors"
-                >
-                  <PencilIcon className="size-3.5" />
-                  {t("pasteScript")}
-                </button>
-              </div>
+              {autoCaptioning ? (
+                <>
+                  <LoaderIcon className="size-8 text-accent animate-spin" />
+                  <p className="text-sm text-text-secondary">{autoCaptionMsg || "AI 가사 생성 중..."}</p>
+                  <div className="w-full max-w-xs bg-overlay-6 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-full bg-accent transition-all duration-300 rounded-full"
+                      style={{ width: `${autoCaptionProgress}%` }}
+                    />
+                  </div>
+                  <span className="text-[11px] text-text-tertiary">{autoCaptionProgress}%</span>
+                </>
+              ) : (
+                <>
+                  <FileTextIcon className="size-10 text-text-tertiary opacity-40" />
+                  <p className="text-sm text-text-tertiary">{t("noScript")}</p>
+                  <button
+                    onClick={handleAutoCaption}
+                    className="flex items-center gap-2 px-5 py-2.5 text-sm bg-accent text-white rounded-xl hover:brightness-110 transition-all active:scale-95 shadow-md"
+                  >
+                    <SparklesIcon className="size-4" />
+                    AI 가사 생성
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-overlay-6 text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                    >
+                      <UploadIcon className="size-3.5" />
+                      {t("uploadScriptFile")}
+                    </button>
+                    <button
+                      onClick={() => { setEditText(""); setScriptMode("edit") }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-overlay-6 text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                    >
+                      <PencilIcon className="size-3.5" />
+                      {t("pasteScript")}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

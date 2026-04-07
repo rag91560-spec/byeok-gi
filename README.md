@@ -1,4 +1,102 @@
-# 번@역+기! (byeok-gi)
+# Game Translator (번@역+기!)
+
+> Any Japanese game, manga, or subtitle — translated into your language. AI-powered, runs locally.
+
+<!-- ![Screenshot](docs/screenshot.png) -->
+<!-- TODO: Add demo GIF -->
+
+## [Join our Discord](https://discord.gg/MxkNZJdq)
+
+## Features
+
+- **Auto Engine Detection** — Scans your game folder and identifies the engine (RPG Maker, Unity, Unreal, and 14+ more)
+- **AI Translation** — Free offline translation (NLLB) included; unlock premium AI translation (Claude, OpenAI, Gemini) with a license
+- **Translation Memory** — Reuses previous translations for consistency
+- **Glossary** — Set custom rules for character names, proper nouns, etc.
+- **Translation Presets** — Save and reuse your translation settings
+- **Live Progress** — Real-time progress tracking via SSE
+- **One-Click Apply/Rollback** — Apply translations to your game and revert anytime
+- **File Structure Visualization** — View game file structure as a flowchart
+- **Auto Updates** — Built-in Electron auto-updater
+
+## Pricing
+
+|  | Monthly | Yearly | Lifetime |
+|--|---------|--------|----------|
+| **USD** ([Patreon](https://www.patreon.com/c/rag91560)) | $5 | $20 | $50 |
+| **JPY** ([Fanbox](https://rag91560.fanbox.cc/)) | ¥500 | ¥2,000 | ¥5,000 |
+
+**Free tier** includes offline NLLB translation — no license needed.
+**Paid tier** unlocks high-quality AI translation with Claude, Gemini, OpenAI, and more.
+
+## Download
+
+> The latest stable build is available on [Pixiv Fanbox](https://rag91560.fanbox.cc/) (free public post) or [Patreon](https://www.patreon.com/c/rag91560).
+
+## Tech Stack
+
+| Area | Tech |
+|------|------|
+| Frontend | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4 |
+| Desktop | Electron 35 |
+| Backend | Python FastAPI |
+| UI | CVA (Class Variance Authority), Lucide Icons |
+| Visualization | @xyflow/react |
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20+
+- Python 3.10+
+- npm
+
+### Development
+
+```bash
+# Install dependencies
+npm install
+pip install -r backend/requirements.txt
+
+# Start Next.js dev server (port 3100)
+npm run dev
+
+# Start Electron in dev mode (separate terminal)
+npm run electron:dev
+```
+
+### Production Build
+
+```bash
+# Build Windows installer
+npm run electron:build
+```
+
+Output will be in `dist-electron/`.
+
+## Project Structure
+
+```
+app/                    # Next.js pages & routing
+backend/                # Python FastAPI backend
+  routers/              # API routers (games, translate, covers, etc.)
+components/
+  ui/                   # Shared UI components (CVA pattern)
+  game-detail/          # Game detail domain components
+  layout/               # Layout (Sidebar, etc.)
+electron/               # Electron main/preload
+hooks/                  # Custom React hooks
+lib/                    # Utilities (api.ts, types.ts, i18n.ts)
+scripts/                # Build scripts
+```
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+# 번@역+기! (byeok-gi) — 한국어
 
 AI 기반 게임 번역 도구. 게임 파일을 자동으로 스캔하고, AI를 활용해 번역한 뒤, 원본에 적용합니다.
 
@@ -6,7 +104,15 @@ AI 기반 게임 번역 도구. 게임 파일을 자동으로 스캔하고, AI�
 
 > 💡 제대로 작동하는 빌드된 버전을 사용하시려면 [Pixiv Fanbox](https://rag91560.fanbox.cc/)에서 다운로드하시는 것을 추천드립니다. (전체공개 게시글이므로 무료로 다운로드 가능합니다.)
 
-<!-- ![Screenshot](docs/screenshot.png) -->
+## 요금제
+
+|  | 월간 | 연간 | 평생 |
+|--|------|------|------|
+| **USD** ([Patreon](https://www.patreon.com/c/rag91560)) | $5 | $20 | $50 |
+| **JPY** ([Fanbox](https://rag91560.fanbox.cc/)) | ¥500 | ¥2,000 | ¥5,000 |
+
+**무료**: NLLB 오프라인 번역 — 라이선스 불필요.
+**유료**: Claude, Gemini, OpenAI 등 고품질 AI 번역 사용 가능.
 
 ## 주요 기능
 

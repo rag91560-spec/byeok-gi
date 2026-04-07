@@ -668,6 +668,14 @@ export const api = {
         `/audio/${id}/translate-script`,
         { method: "POST", body: JSON.stringify({ source_lang: sourceLang, target_lang: targetLang }) },
       ),
+
+    autoCaption: (id: number, body: { provider?: string; api_key?: string; model?: string; source_lang?: string; target_lang?: string; stt_provider?: string; stt_api_key?: string }) =>
+      request<{ job_id: string; status: string }>(
+        `/audio/${id}/auto-caption`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
+    autoCaptionStatusUrl: (jobId: string) => `${BASE}/audio/auto-caption/${jobId}/status`,
   },
 
   categories: {

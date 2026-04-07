@@ -370,3 +370,91 @@ async def translate_audio_script(audio_id: int, body: TranslateScriptRequest):
         "cached": cached,
         "item": updated_item,
     }
+
+
+# ── Auto-Caption (STT + Translation → Spotify lyrics) ───────────
+
+class AutoCaptionRequest(BaseModel):
+    provider: str = ""
+    api_key: str = ""
+    model: str = ""
+    source_lang: str = "ja"
+    target_lang: str = "ko"
+    stt_provider: str = "whisper_api"
+    stt_api_key: str = ""
+
+
+@router.post("/{audio_id}/auto-caption")
+async def auto_caption(audio_id: int, body: AutoCaptionRequest):
+    """Run STT + Translation on audio, save result as Spotify-style lyrics."""
+    await require_license()
+    audio = await db.get_audio_item(audio_id)
+    if not audio:
+        raise HTTPException(404, "Audio not found")
+    if audio.get("type") != "local":
+        raise HTTPException(400, "Only local audio files can be auto-captioned")
+
+    audio_path = audio.get("source", "")
+    if not audio_path or not os.path.isfile(audio_path):
+        raise HTTPException(400, f"Audio file not found: {audio_path}")
+
+    # Resolve API keys from settings if not provided
+    settings = await db.get_settings()
+    api_keys_raw = settings.get("api_keys", {})
+    if isinstance(api_keys_raw, str):
+        try:
+            api_keys_raw = json.loads(api_keys_raw)
+        except Exception:
+            api_keys_raw = {}
+
+    provider = body.provider or settings.get("default_provider", "claude_api")
+    api_key = body.api_key or api_keys_raw.get(provider, "")
+    model = body.model or ""
+    stt_api_key = body.stt_api_key or api_keys_raw.get("openai", "")
+
+    from .. import subtitle_job_manager as sjm
+    job = await sjm.start_auto_caption(
+        audio_id=audio_id,
+        audio_path=audio_path,
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        source_lang=body.source_lang,
+        target_lang=body.target_lang,
+        stt_provider=body.stt_provider,
+        stt_api_key=stt_api_key,
+    )
+    return {"job_id": job.job_id, "status": job.status}
+
+
+@router.get("/auto-caption/{job_id}/status")
+async def auto_caption_status(job_id: str):
+    """SSE stream for auto-caption job progress."""
+    import asyncio
+    from fastapi.responses import StreamingResponse
+    from .. import subtitle_job_manager as sjm
+
+    job = sjm.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    q = job.add_sse_listener()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"data: {json.dumps(msg)}\n\n"
+                    if msg.get("event") in ("complete", "error", "cancelled"):
+                        break
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'event': 'heartbeat', 'data': {}})}\n\n"
+        finally:
+            job.remove_sse_listener(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
