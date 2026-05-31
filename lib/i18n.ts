@@ -163,6 +163,9 @@ export const translations = {
     scanFailed: "게임 스캔에 실패했습니다",
     translationStartFailed: "번역 시작에 실패했습니다",
     preparingTranslation: "번역 준비 중...",
+    extractingStrings: "문자열 추출 중...",
+    checkingTranslationMemory: "번역 메모리 확인 중...",
+    startingTranslation: "번역 시작 중...",
     applyFailed: "번역 적용에 실패했습니다",
     // Library page
     searchGames: "게임 검색...",
@@ -960,6 +963,9 @@ export const translations = {
     scanFailed: "Game scan failed",
     translationStartFailed: "Failed to start translation",
     preparingTranslation: "Preparing translation...",
+    extractingStrings: "Extracting strings...",
+    checkingTranslationMemory: "Checking translation memory...",
+    startingTranslation: "Starting translation...",
     applyFailed: "Failed to apply translation",
     // Library page
     searchGames: "Search games...",

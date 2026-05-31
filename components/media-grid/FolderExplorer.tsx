@@ -24,6 +24,7 @@ function BreadcrumbButton({ folderId, label, active, onClick, onDropItem }: Brea
   })
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         "flex items-center gap-1 px-2 py-1 rounded transition-colors shrink-0",
@@ -32,9 +33,30 @@ function BreadcrumbButton({ folderId, label, active, onClick, onDropItem }: Brea
           : "text-text-secondary hover:bg-overlay-4 hover:text-text-primary",
         drop.isOver && "bg-accent/20 ring-1 ring-accent",
       )}
-      onDragOver={onDropItem ? drop.onDragOver : undefined}
-      onDragLeave={onDropItem ? drop.onDragLeave : undefined}
-      onDrop={onDropItem ? drop.onDrop : undefined}
+      onDragOver={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDragOver(e)
+            }
+          : undefined
+      }
+      onDragLeave={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDragLeave()
+            }
+          : undefined
+      }
+      onDrop={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDrop(e)
+            }
+          : undefined
+      }
     >
       {label}
     </button>
@@ -177,6 +199,7 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
         <div className="flex-1" />
         {onCreateFolder && (
           <button
+            type="button"
             onClick={openNewFolder}
             className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded hover:bg-overlay-4 text-text-secondary hover:text-text-primary transition-colors shrink-0"
             title={t("newFolder")}
@@ -217,12 +240,14 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
             />
             <div className="flex justify-end gap-2 mt-4">
               <button
+                type="button"
                 onClick={() => setNewFolderOpen(false)}
                 className="px-3 py-1.5 text-sm rounded-md hover:bg-overlay-4 text-text-secondary hover:text-text-primary transition-colors"
               >
                 {t("cancel")}
               </button>
               <button
+                type="button"
                 onClick={submitNewFolder}
                 disabled={!newFolderName.trim()}
                 className="px-3 py-1.5 text-sm rounded-md bg-accent text-white hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

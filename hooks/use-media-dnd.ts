@@ -17,6 +17,10 @@ export function getDraggedItem() {
 
 const MIME = "application/x-media-item"
 
+function hasMediaPayload(e: React.DragEvent): boolean {
+  return Array.from(e.dataTransfer.types).includes(MIME)
+}
+
 // --- useDragItem: makes an element draggable ---
 
 export function useDragItem(type: DragPayload["type"], id: number) {
@@ -49,8 +53,9 @@ export function useDropTarget(onDrop: (item: DragPayload) => void) {
   const onDragOver = useCallback(
     (e: React.DragEvent) => {
       // Only accept internal media items, not external files
-      if (!e.dataTransfer.types.includes(MIME)) return
+      if (!hasMediaPayload(e)) return
       e.preventDefault()
+      e.stopPropagation()
       e.dataTransfer.dropEffect = "move"
       setIsOver(true)
     },
@@ -63,7 +68,9 @@ export function useDropTarget(onDrop: (item: DragPayload) => void) {
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      if (!hasMediaPayload(e)) return
       e.preventDefault()
+      e.stopPropagation()
       setIsOver(false)
       const item = _draggedItem
       if (!item) return
@@ -94,8 +101,9 @@ export function useMergeTarget(
 
   const onDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes(MIME)) return
+      if (!hasMediaPayload(e)) return
       e.preventDefault()
+      e.stopPropagation()
       e.dataTransfer.dropEffect = "move"
       if (!timerRef.current && !showMerge) {
         timerRef.current = setTimeout(() => {
@@ -114,7 +122,9 @@ export function useMergeTarget(
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      if (!hasMediaPayload(e)) return
       e.preventDefault()
+      e.stopPropagation()
       clearTimer()
       setShowMerge(false)
       const item = _draggedItem

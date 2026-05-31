@@ -39,6 +39,7 @@ export interface TranslateRequest {
   source_lang?: string
   target_lang?: string
   preset_id?: number
+  use_memory?: boolean
   start_index?: number
   end_index?: number
 }
@@ -261,6 +262,7 @@ export interface TranslationEntry {
   review_status?: string
   reviewer_note?: string
   edited_at?: string
+  _translation_schema?: string
 }
 
 export interface TranslationStringsResponse {
@@ -691,6 +693,7 @@ export interface ElectronAPI {
   selectVideoFiles: () => Promise<string[]>
   selectVideoFolder: () => Promise<string>
   selectAudioFolder: () => Promise<string>
+  launchNativeGame: (opts: { exePath: string }) => Promise<{ ok: boolean; pid?: number }>
   registerKillHotkey: (key: string) => Promise<boolean>
   unregisterKillHotkey: () => Promise<void>
   liveTranslation: LiveTranslationAPI

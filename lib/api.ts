@@ -51,23 +51,39 @@ import type {
   SubtitleGlossaryEntry,
 } from "./types"
 
-const BASE = "/api"
+const BASE = "/gt-api"
 // Direct backend URL for large file uploads (Next.js rewrite proxy has ~8MB body limit)
 const BACKEND = "http://localhost:8000/api"
+const DEFAULT_TIMEOUT_MS = 30000
+const CURRENT_TRANSLATION_SCHEMA = "chunk-index-v2"
+
+function requestTimeoutSignal(timeoutMs = DEFAULT_TIMEOUT_MS): AbortSignal | undefined {
+  const timeout = (AbortSignal as typeof AbortSignal & { timeout?: (ms: number) => AbortSignal }).timeout
+  return timeout ? timeout(timeoutMs) : undefined
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const { headers: extraHeaders, ...rest } = options ?? {}
-  const res = await fetch(`${BASE}${path}`, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      ...(extraHeaders instanceof Headers
-        ? Object.fromEntries(extraHeaders.entries())
-        : Array.isArray(extraHeaders)
-          ? Object.fromEntries(extraHeaders)
-          : extraHeaders),
-    },
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...rest,
+      signal: rest.signal ?? requestTimeoutSignal(),
+      headers: {
+        "Content-Type": "application/json",
+        ...(extraHeaders instanceof Headers
+          ? Object.fromEntries(extraHeaders.entries())
+          : Array.isArray(extraHeaders)
+            ? Object.fromEntries(extraHeaders)
+            : extraHeaders),
+      },
+    })
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("Request timed out. Backend may be unavailable.")
+    }
+    throw err
+  }
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}`
     try {
@@ -83,6 +99,83 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(errorMessage)
   }
   return res.json()
+}
+
+async function parseErrorResponse(res: Response): Promise<string> {
+  const errorMessage = `HTTP ${res.status}`
+  try {
+    const err = await res.json()
+    return err.detail || err.message || errorMessage
+  } catch {
+    const text = await res.text().catch(() => "")
+    return text && text.length < 200 ? `${errorMessage}: ${text}` : errorMessage
+  }
+}
+
+async function requestForm<T>(url: string, data: FormData): Promise<T> {
+  const res = await fetch(url, { method: "POST", body: data, signal: requestTimeoutSignal(120000) })
+  if (!res.ok) throw new Error(await parseErrorResponse(res))
+  return res.json()
+}
+
+async function requestBackend<T>(path: string, options?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const { headers: extraHeaders, ...rest } = options ?? {}
+  let res: Response
+  try {
+    res = await fetch(`${BACKEND}${path}`, {
+      ...rest,
+      signal: rest.signal ?? requestTimeoutSignal(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        ...(extraHeaders instanceof Headers
+          ? Object.fromEntries(extraHeaders.entries())
+          : Array.isArray(extraHeaders)
+            ? Object.fromEntries(extraHeaders)
+            : extraHeaders),
+      },
+    })
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("Request timed out. Backend may be unavailable.")
+    }
+    throw err
+  }
+  if (!res.ok) throw new Error(await parseErrorResponse(res))
+  return res.json()
+}
+
+async function assertNoLegacySavedTranslations(gameId: number): Promise<void> {
+  const perPage = 200
+  const statuses = ["translated", "reviewed"]
+
+  for (const status of statuses) {
+    let page = 1
+    let checked = 0
+    let total = 0
+
+    do {
+      const params = new URLSearchParams({
+        page: String(page),
+        per_page: String(perPage),
+        status,
+      })
+      const translatedPage = await request<TranslationStringsResponse>(
+        `/games/${gameId}/translate/strings?${params}`,
+      )
+      total = translatedPage.total
+      checked += translatedPage.entries.length
+
+      const hasLegacyTranslations = translatedPage.entries.some(
+        (entry) => entry.translated && entry._translation_schema !== CURRENT_TRANSLATION_SCHEMA,
+      )
+      if (hasLegacyTranslations) {
+        throw new Error("이전 버그로 생성된 깨진 번역 데이터입니다. 재번역으로 전체 초기화 후 다시 적용하세요.")
+      }
+
+      if (translatedPage.entries.length === 0) break
+      page += 1
+    } while (checked < total)
+  }
 }
 
 // --- Games ---
@@ -103,11 +196,28 @@ export const api = {
     delete: (id: number) =>
       request<{ ok: boolean }>(`/games/${id}`, { method: "DELETE" }),
 
-    scan: (id: number) =>
-      request<ScanResult>(`/games/${id}/scan`, { method: "POST" }),
+    scan: async (id: number): Promise<ScanResult> => {
+      const res = await fetch(`${BASE}/games/${id}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: requestTimeoutSignal(600000),
+      })
+      if (!res.ok) {
+        let errorMessage = `HTTP ${res.status}`
+        try {
+          const err = await res.json()
+          errorMessage = err.detail || err.message || errorMessage
+        } catch {
+          const text = await res.text().catch(() => "")
+          if (text && text.length < 200) errorMessage = `${errorMessage}: ${text}`
+        }
+        throw new Error(errorMessage)
+      }
+      return res.json()
+    },
 
     launch: (id: number) =>
-      request<LaunchResult>(`/games/${id}/launch`, { method: "POST" }),
+      requestBackend<LaunchResult>(`/games/${id}/launch`, { method: "POST" }),
 
     scanAll: () =>
       request<{ total: number; results: Array<{ game_id: number; ok: boolean; engine?: string; string_count?: number; error?: string; skipped?: boolean }> }>(
@@ -134,16 +244,33 @@ export const api = {
     start: (gameId: number, data: TranslateRequest) =>
       request<TranslationJob>(`/games/${gameId}/translate`, {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, use_memory: data.use_memory ?? false }),
+        signal: requestTimeoutSignal(180000),
       }),
 
     cancel: (gameId: number) =>
       request<{ ok: boolean }>(`/games/${gameId}/translate/cancel`, { method: "POST" }),
 
-    apply: (gameId: number) =>
-      request<{ ok: boolean; patch_path?: string }>(`/games/${gameId}/translate/apply`, {
+    apply: async (gameId: number): Promise<{ ok: boolean; patch_path?: string }> => {
+      await assertNoLegacySavedTranslations(gameId)
+      const res = await fetch(`${BASE}/games/${gameId}/translate/apply`, {
         method: "POST",
-      }),
+        headers: { "Content-Type": "application/json" },
+        signal: requestTimeoutSignal(600000),
+      })
+      if (!res.ok) {
+        let errorMessage = `HTTP ${res.status}`
+        try {
+          const err = await res.json()
+          errorMessage = err.detail || err.message || errorMessage
+        } catch {
+          const text = await res.text().catch(() => "")
+          if (text && text.length < 200) errorMessage = `${errorMessage}: ${text}`
+        }
+        throw new Error(errorMessage)
+      }
+      return res.json()
+    },
 
     rollback: (gameId: number) =>
       request<{ ok: boolean; restored_count: number }>(`/games/${gameId}/translate/rollback`, {
@@ -151,7 +278,7 @@ export const api = {
       }),
 
     statusUrl: (gameId: number) => `${BASE}/games/${gameId}/translate/status`,
-    pollUrl: (gameId: number) => `/api/games/${gameId}/translate/poll`,
+    pollUrl: (gameId: number) => `${BASE}/games/${gameId}/translate/poll`,
   },
 
   settings: {
@@ -164,7 +291,7 @@ export const api = {
         body: JSON.stringify({ provider, key }),
       }),
     crashLog: async (): Promise<string> => {
-      const res = await fetch("/api/settings/crash-log")
+      const res = await fetch(`${BASE}/settings/crash-log`)
       return res.text()
     },
     clearCrashLog: () =>
@@ -410,6 +537,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(data),
       }),
+
+    resetTranslations: (gameId: number) =>
+      request<{ ok: boolean; updated: number }>(`/games/${gameId}/translate/strings/reset`, {
+        method: "POST",
+      }),
   },
 
   glossary: {
@@ -433,12 +565,10 @@ export const api = {
     },
 
     importJson: (gameId: number, data: FormData) =>
-      fetch(`${BACKEND}/games/${gameId}/project/import`, { method: "POST", body: data })
-        .then(r => r.json()) as Promise<ImportResult>,
+      requestForm<ImportResult>(`${BACKEND}/games/${gameId}/project/import`, data),
 
     importCsv: (gameId: number, data: FormData) =>
-      fetch(`${BACKEND}/games/${gameId}/project/import/csv`, { method: "POST", body: data })
-        .then(r => r.json()) as Promise<ImportResult>,
+      requestForm<ImportResult>(`${BACKEND}/games/${gameId}/project/import/csv`, data),
   },
 
   media: {
@@ -936,7 +1066,7 @@ export const api = {
       request<{ ok: boolean }>(`/games/${gameId}/agent/cancel`, { method: "POST" }),
 
     statusUrl: (gameId: number) => `${BASE}/games/${gameId}/agent/status`,
-    pollUrl: (gameId: number) => `/api/games/${gameId}/agent/poll`,
+    pollUrl: (gameId: number) => `${BASE}/games/${gameId}/agent/poll`,
   },
 
   filesystem: {

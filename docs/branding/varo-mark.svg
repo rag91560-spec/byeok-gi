@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 비대칭 V: 왼쪽 다리(3,5)→꼭지(10,19)→오른쪽 다리(17,5)→화살표 가로 연장(25,5) -->
+  <path d="M3 5 L10 19 L17 5 L25 5" />
+  <!-- 화살촉 -->
+  <path d="M22 2 L25 5 L22 8" />
+</svg>

@@ -5,6 +5,7 @@ import { Loader2Icon, DownloadIcon, PaintbrushIcon, TypeIcon } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { useLocale } from "@/hooks/use-locale"
+import type { TranslationKey } from "@/lib/i18n"
 import type { InpaintMode, FontInfo, RenderConfig, DetectorType } from "@/lib/types"
 
 interface RenderSettingsProps {
@@ -134,8 +135,8 @@ export function RenderSettings({ mangaId, currentPage, totalPages, detector, onD
                   : "border-border text-text-secondary hover:border-border-subtle"
               }`}
             >
-              <div className="font-medium">{t(m.labelKey as any)}</div>
-              <div className="text-[10px] opacity-70">{t(m.descKey as any)}</div>
+              <div className="font-medium">{t(m.labelKey as TranslationKey)}</div>
+              <div className="text-[10px] opacity-70">{t(m.descKey as TranslationKey)}</div>
             </button>
           ))}
         </div>

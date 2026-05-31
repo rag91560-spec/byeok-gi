@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import os
+import contextlib
 import re
 import uuid
 
@@ -252,16 +253,18 @@ async def upload_audio(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
-    chunks = []
     total = 0
-    while chunk := await file.read(8192):
-        total += len(chunk)
-        if total > MAX_AUDIO_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large (max 100MB)")
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    with open(dest, "wb") as f:
-        f.write(content)
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_AUDIO_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large (max 100MB)")
+                f.write(chunk)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(dest)
+        raise
     title = os.path.splitext(file.filename or "audio")[0]
     abs_dest = os.path.abspath(dest)
     return await db.create_audio_item(
@@ -270,7 +273,7 @@ async def upload_audio(file: UploadFile = File(...)):
         source=abs_dest,
         thumbnail="",
         duration=probe_media_duration(abs_dest),
-        size=len(content),
+        size=total,
         sort_order=0,
     )
 

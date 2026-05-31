@@ -40,7 +40,8 @@ import { TranslationPanel } from "@/components/game-detail/TranslationPanel"
 import { MediaPanel } from "@/components/game-detail/MediaPanel"
 import { useAIChat } from "@/hooks/use-ai-chat"
 
-const HTML_ENGINES = ["rpg maker mv/mz", "tyranoscript", "gdevelop", "html"]
+// RPG Maker MV/MZ는 Game.exe(NW.js) 항상 있음 — HTML 표시 안 함
+const HTML_ENGINES = ["tyranoscript", "gdevelop", "html"]
 
 /* ─── Action Icon Button ─── */
 function ActionIconButton({ onClick, children, title, isActive, isDanger }: {
@@ -126,7 +127,9 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
   const [showCoverSearch, setShowCoverSearch] = useState(false)
 
   const isAndroid = game?.platform === "android"
-  const isHtmlGame = HTML_ENGINES.includes((game?.engine || "").toLowerCase())
+  // 네이티브 exe(예: RPG Maker MV/MZ의 Game.exe NW.js)가 있으면 HTML 게임이 아닌 네이티브로 취급
+  const isHtmlEngine = HTML_ENGINES.includes((game?.engine || "").toLowerCase())
+  const isHtmlGame = isHtmlEngine && !game?.exe_path
 
   const handleScan = useCallback(async () => {
     if (gameId === null) return
@@ -140,8 +143,17 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
     setLaunching(true)
     setActionError("")
     try {
+      if (window.electronAPI?.isElectron && game?.exe_path && !isHtmlGame) {
+        await window.electronAPI.launchNativeGame({ exePath: game.exe_path })
+        api.games.update(gameId, { last_played_at: new Date().toISOString() }).then(refresh).catch(() => {})
+        return
+      }
+
       const result = await api.games.launch(gameId)
-      if (result.html_game && result.serve_url) {
+      // 가드: 게임에 네이티브 exe가 있으면 백엔드 응답이 html이라도 Electron BrowserWindow 사용 안 함.
+      // 백엔드가 native subprocess.Popen으로 이미 실행했으므로 추가 동작 불필요.
+      const hasNativeExe = !!(result.exe_path || game?.exe_path)
+      if (result.html_game && result.serve_url && !hasNativeExe) {
         if (window.electronAPI?.isElectron) {
           await window.electronAPI.openHtmlGame({
             gameId,
@@ -158,7 +170,7 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setLaunching(false)
     }
-  }, [gameId, game?.title, router])
+  }, [gameId, game?.exe_path, game?.title, isHtmlGame, refresh, router])
 
   const [startingTranslation, setStartingTranslation] = useState(false)
 
@@ -173,6 +185,7 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
         model: opts.model,
         source_lang: game?.source_lang || "auto",
         preset_id: opts.presetId,
+        use_memory: false,
       })
       connect()
     } catch (e) {
@@ -185,8 +198,17 @@ export default function GameDetailPage({ params }: { params: Promise<{ id: strin
 
   const handleCancel = useCallback(async () => {
     if (gameId === null) return
-    try { await api.translate.cancel(gameId) } catch (e) { console.error("Cancel failed:", e) }
-  }, [gameId])
+    setActionError("")
+    try {
+      await api.translate.cancel(gameId)
+      reset()
+      await refresh()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Cancel failed"
+      setActionError(msg)
+      console.error("Cancel failed:", e)
+    }
+  }, [gameId, refresh, reset])
 
   const handleDelete = useCallback(async () => {
     if (gameId === null) return

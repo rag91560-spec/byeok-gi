@@ -5,9 +5,13 @@ import logging
 import re
 import sys
 import os
+import shutil
 import subprocess
 import json
 import random
+import tempfile
+import uuid
+from contextlib import contextmanager
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -17,6 +21,23 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded ue_translator module (deferred to avoid crash when tkinter is missing)
 ue_translator = None
 UE_TRANSLATOR_DIR = ""
+
+
+@contextmanager
+def _apply_tempdir(prefix: str):
+    """Use a repo-local temp folder so Windows AppData Temp locks do not break apply."""
+    temp_root = Path(os.environ.get("GT_APPLY_TEMP_DIR") or Path(__file__).resolve().parents[1] / ".tmp_apply")
+    temp_root.mkdir(parents=True, exist_ok=True)
+    tmpdir_path = temp_root / f"{prefix}{uuid.uuid4().hex}"
+    tmpdir_path.mkdir(parents=True, exist_ok=False)
+    tmpdir = str(tmpdir_path)
+    try:
+        probe = tmpdir_path / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        yield tmpdir
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _get_ue_search_paths() -> list[str]:
@@ -505,8 +526,6 @@ def _apply_translations_inner(game_path: str, engine_name: str,
 
 def _apply_ue4_patch_pak(game_path: str, engine_obj, project, resources: list[dict], aes_key: str = "") -> str:
     """UE4-specific: create a patch _P.pak with translated .locres."""
-    import tempfile
-
     repak = _create_repak(aes_key=aes_key)
     if not repak.available:
         repak.download()
@@ -566,7 +585,7 @@ def _apply_ue4_patch_pak(game_path: str, engine_obj, project, resources: list[di
                 source_locres_rel, src_lang, [f.replace("\\", "/") for f in game_locres])
 
     # Extract and parse original locres
-    with tempfile.TemporaryDirectory() as extract_dir:
+    with _apply_tempdir("ue-extract-") as extract_dir:
         extracted_path = repak.extract_file(base_pak_path, source_locres_rel, extract_dir)
         parser = ue_translator.LocresParser()
         parser.parse(extracted_path)
@@ -584,7 +603,7 @@ def _apply_ue4_patch_pak(game_path: str, engine_obj, project, resources: list[di
 
     ko_rel_path = _strip_mount(source_locres_rel)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _apply_tempdir("ue-pack-") as tmpdir:
         # Write translated .locres
         locres_out = os.path.join(tmpdir, ko_rel_path)
         os.makedirs(os.path.dirname(locres_out), exist_ok=True)
@@ -609,29 +628,16 @@ def _apply_ue4_patch_pak(game_path: str, engine_obj, project, resources: list[di
         except Exception as e:
             logger.warning("Font replacement failed (non-fatal): %s", e)
 
-        # Remove old translation patch paks (those containing locres)
-        existing_patches = sorted(Path(paks_dir).glob("*_P.pak"))
-        for p in existing_patches:
-            try:
-                files = repak.list_files(str(p))
-                if any(f.endswith(".locres") for f in files):
-                    p.unlink()
-                    logger.info("Removed old translation pak: %s", p.name)
-            except Exception:
-                pass
-
-        # Determine next patch number
-        remaining = list(Path(paks_dir).glob("*_P.pak"))
-        patch_nums = []
-        for p in remaining:
-            match = re.search(r'_(\d+)_P\.pak$', p.name)
-            if match:
-                patch_nums.append(int(match.group(1)))
-        next_num = max(patch_nums, default=0) + 1
-
         base_name = base_paks[0].stem
-        patch_pak_name = f"{base_name}_{next_num}_P.pak"
+        patch_pak_name = f"{base_name}_GameTranslator_P.pak"
         patch_pak_path = os.path.join(paks_dir, patch_pak_name)
+
+        # Only replace patches owned by this app. User mods can also be *_P.pak
+        # files and may contain .locres as part of a combined patch.
+        owned_patch = Path(patch_pak_path)
+        if owned_patch.exists():
+            owned_patch.unlink()
+            logger.info("Removed previous Game Translator pak: %s", owned_patch.name)
 
         # Pack with version/compression matching
         repak.pack(tmpdir, patch_pak_path, match_pak=base_pak_path)
@@ -752,16 +758,15 @@ def launch_game(exe_path: str) -> None:
 
     On Windows, if a `.le.config` sibling exists (Wolf RPG / RPGM2003 etc. that
     requires Japanese ACP), automatically wrap launch with Locale Emulator
-    (LEProc.exe). Falls back to direct launch with a warning if LEProc not found.
+    (LEProc.exe). Native Windows launches use ShellExecuteW so GUI games follow
+    the same desktop/shell path as double-clicking the executable in Explorer.
     """
     cwd = str(Path(exe_path).parent)
-    kwargs: dict = {"cwd": cwd}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        kwargs["start_new_session"] = True
 
     if sys.platform == "win32":
+        import ctypes
+
+        SW_SHOWNORMAL = 1
         le_config = _needs_locale_emulator(exe_path)
         if le_config:
             leproc = _find_leproc()
@@ -770,8 +775,6 @@ def launch_game(exe_path: str) -> None:
                 # subprocess.Popen launches LEProc in a context where its DLL injection
                 # fails with SYSTEM_REPORT on Win11. ShellExecuteW invokes via the shell
                 # which routes through LE's installed handler and UAC properly.
-                import ctypes
-                SW_SHOWNORMAL = 1
                 # LEProc accepts the target exe path as a single argument; it then
                 # auto-detects the sibling .le.config.
                 params = f'"{exe_path}"'
@@ -790,6 +793,15 @@ def launch_game(exe_path: str) -> None:
                     f"or set GT_LEPROC_PATH env var."
                 )
 
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            None, "open", exe_path, None, cwd, SW_SHOWNORMAL
+        )
+        if rc > 32:
+            logger.info("Launched via ShellExecute: %s", exe_path)
+            return
+        raise OSError(f"ShellExecuteW failed with code {rc} for {exe_path}")
+
+    kwargs: dict = {"cwd": cwd, "start_new_session": True}
     subprocess.Popen([exe_path], **kwargs)
 
 

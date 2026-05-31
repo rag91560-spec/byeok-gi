@@ -30,7 +30,8 @@ class FolderUpdate(_PydanticBase):
 
 logger = logging.getLogger(__name__)
 
-HTML_ENGINES = {"rpg maker mv/mz", "tyranoscript", "gdevelop", "html"}
+# RPG Maker MV/MZ는 항상 Game.exe(NW.js) 동봉이므로 네이티브로만 실행 — HTML 폴백 제외
+HTML_ENGINES = {"tyranoscript", "gdevelop", "html"}
 
 # Blocked system directories (path traversal defense)
 _BLOCKED_PREFIXES_WIN = ["C:\\Windows", "C:\\Program Files", "C:\\ProgramData"]
@@ -462,9 +463,33 @@ async def launch_game(game_id: int):
         await db.update_game(game_id, last_played_at=datetime.now(timezone.utc).isoformat())
         return {"ok": True, "exe_path": "", "device_id": result.get("device_id", "")}
 
-    # HTML games: return serve URL instead of launching process
+    # Prefer native executable when available (e.g. RPG Maker MV/MZ ships
+    # Game.exe with NW.js — running it gives proper Korean fonts/IME support).
+    # Fall back to in-app HTML serve only when no .exe is bundled.
+    exe_path = game.get("exe_path", "")
+    has_exe = bool(exe_path) and Path(exe_path).is_file()
+
+    # DB에 exe_path가 없거나 파일이 사라진 경우 즉석에서 재탐색
+    if not has_exe:
+        try:
+            found = await asyncio.to_thread(engine_bridge.find_game_exe, game["path"])
+        except Exception:
+            found = None
+        if found and Path(found).is_file():
+            exe_path = found
+            has_exe = True
+            await db.update_game(game_id, exe_path=exe_path)
+
     game_engine = (game.get("engine") or "").lower()
-    if game_engine in HTML_ENGINES or engine_bridge.is_html_game(game["path"]):
+    is_html = game_engine in HTML_ENGINES or engine_bridge.is_html_game(game["path"])
+
+    # 디버그: 어느 분기로 가는지 로그 (reload 검증용)
+    logger.info(
+        "[launch_game] id=%s engine=%r exe_path=%r has_exe=%s is_html=%s",
+        game_id, game_engine, exe_path, has_exe, is_html,
+    )
+
+    if is_html and not has_exe:
         html_index = engine_bridge.find_html_index(game["path"])
         if html_index:
             await db.update_game(game_id, last_played_at=datetime.now(timezone.utc).isoformat())
@@ -474,12 +499,11 @@ async def launch_game(game_id: int):
                 "serve_url": f"/api/games/{game_id}/serve/{html_index}",
             }
 
-    exe_path = game.get("exe_path", "")
-    if not exe_path or not Path(exe_path).is_file():
+    if not has_exe:
         raise HTTPException(400, "No executable found for this game")
 
     try:
-        engine_bridge.launch_game(exe_path)
+        await asyncio.to_thread(engine_bridge.launch_game, exe_path)
     except Exception as e:
         logger.exception("Failed to launch game %s", game_id)
         raise HTTPException(500, f"Failed to launch: {e}")

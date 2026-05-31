@@ -60,24 +60,23 @@ const NAV_ITEMS: readonly NavItem[] = [
   { labelKey: "admin", href: "/admin", icon: ShieldCheckIcon, group: "system" },
 ]
 
+const noDragStyle = { WebkitAppRegion: "no-drag" } as React.CSSProperties
+
 function TranslatorLogo({ className }: { readonly className?: string }) {
   return (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 28 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={2.5}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn("size-5", className)}
+      className={cn("h-5 w-auto", className)}
       aria-hidden="true"
     >
-      <path d="M5 8l6 6" />
-      <path d="M4 14l6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2h1" />
-      <path d="m22 22-5-10-5 10" />
-      <path d="M14 18h6" />
+      {/* Varo mark: 비대칭 V + 우측 화살표 (V 오른쪽 다리가 그대로 화살표로 연장) */}
+      <path d="M3 5 L10 19 L17 5 L25 5" />
+      <path d="M22 2 L25 5 L22 8" />
     </svg>
   )
 }
@@ -180,6 +179,7 @@ export function Sidebar() {
         key={item.labelKey}
         href={item.href}
         title={t(item.labelKey)}
+        style={noDragStyle}
         className={cn(
           "flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
           "justify-center md:justify-start px-0 md:px-3 py-2.5 md:py-[7px]",
@@ -205,13 +205,13 @@ export function Sidebar() {
     <aside className={cn(
       "flex flex-col shrink-0 sticky top-0 h-screen bg-sidebar-bg border-r border-border-subtle",
       "w-14 md:w-[200px]"
-    )}>
+    )} style={noDragStyle}>
       {/* Logo — drag region in Electron */}
       <div className={cn(
         "flex items-center gap-2.5 px-3 md:px-4 h-14 shrink-0 sidebar-drag-region border-b border-border-subtle",
         isElectron && "electron-titlebar-pad"
       )}>
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center gap-2.5" style={noDragStyle}>
           <TranslatorLogo className="text-accent shrink-0" />
           <span className="hidden md:inline text-sm font-bold text-text-primary tracking-tight">
             번<span className="text-accent">@</span>역<span className="text-accent">+</span>기<span className="text-accent">!</span>
@@ -227,6 +227,7 @@ export function Sidebar() {
           <Link
             href="/library"
             title={t("library")}
+            style={noDragStyle}
             className={cn(
               "flex items-center justify-center rounded-lg text-[13px] transition-all duration-150 md:hidden",
               "px-0 py-2.5",
@@ -241,6 +242,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => setLibraryOpen(prev => !prev)}
+            style={noDragStyle}
             className={cn(
               "hidden md:flex w-full items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
               "px-3 py-[7px]",
@@ -267,6 +269,7 @@ export function Sidebar() {
                     key={item.labelKey}
                     href={item.href}
                     title={t(item.labelKey)}
+                    style={noDragStyle}
                     className={cn(
                       "flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
                       "pl-7 pr-3 py-[7px]",
@@ -326,14 +329,18 @@ export function Sidebar() {
       <div className="shrink-0 border-t border-border-subtle">
         <div className="flex flex-col items-center gap-1 py-2 md:hidden">
           <button
+            type="button"
             onClick={cycleTheme}
+            style={noDragStyle}
             className="size-9 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-colors"
             title={themeLabel}
           >
             {themeIcon}
           </button>
           <button
+            type="button"
             onClick={toggleLocale}
+            style={noDragStyle}
             className="size-9 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-colors"
             title={locale === "ko" ? "Switch to English" : "한국어로 전환"}
           >
@@ -342,14 +349,18 @@ export function Sidebar() {
         </div>
         <div className="hidden md:flex items-center gap-1 px-3 py-2.5">
           <button
+            type="button"
             onClick={cycleTheme}
+            style={noDragStyle}
             className="flex-1 flex items-center gap-1.5 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded transition-colors"
           >
             {themeIcon}
             <span>{themeLabel}</span>
           </button>
           <button
+            type="button"
             onClick={toggleLocale}
+            style={noDragStyle}
             className="flex items-center gap-1 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded transition-colors"
           >
             <GlobeIcon className="size-3.5" />

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectVideoFiles: () => ipcRenderer.invoke("select-video-files"),
   selectVideoFolder: () => ipcRenderer.invoke("select-video-folder"),
   selectAudioFolder: () => ipcRenderer.invoke("select-audio-folder"),
+  launchNativeGame: (opts) => ipcRenderer.invoke("launch-native-game", opts),
   openHtmlGame: (opts) => ipcRenderer.invoke("open-html-game", opts),
   closeHtmlGame: (opts) => ipcRenderer.invoke("close-html-game", opts),
   showConfirm: (message) => ipcRenderer.invoke("show-confirm-dialog", message),

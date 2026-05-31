@@ -1,6 +1,6 @@
 {
   "name": "game-translator",
-  "version": "1.4.0",
+  "version": "1.4.3",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -8,13 +8,13 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev --webpack --port 3100",
-    "build": "next build",
+    "dev": "next dev --webpack --hostname 127.0.0.1 --port 3100",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "electron:dev": "electron .",
-    "electron:build": "next build && python scripts/build-backend.py && node scripts/prepare-build.js && electron-builder",
-    "electron:pack": "next build && python scripts/build-backend.py && node scripts/prepare-build.js && electron-builder --dir"
+    "electron:build": "next build --webpack && python scripts/build-backend.py && node scripts/prepare-build.js && node scripts/verify-build-inputs.js && electron-builder",
+    "electron:pack": "next build --webpack && python scripts/build-backend.py && node scripts/prepare-build.js && node scripts/verify-build-inputs.js && electron-builder --dir"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.4",

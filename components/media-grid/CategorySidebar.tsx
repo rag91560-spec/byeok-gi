@@ -40,11 +40,25 @@ function CategoryItem({
 }) {
   const drop = useDropTarget(onDropItem ?? (() => {}))
   const dropProps = onDropItem
-    ? { onDragOver: drop.onDragOver, onDragLeave: drop.onDragLeave, onDrop: drop.onDrop }
+    ? {
+        onDragOver: (e: React.DragEvent<HTMLButtonElement>) => {
+          e.stopPropagation()
+          drop.onDragOver(e)
+        },
+        onDragLeave: (e: React.DragEvent<HTMLButtonElement>) => {
+          e.stopPropagation()
+          drop.onDragLeave()
+        },
+        onDrop: (e: React.DragEvent<HTMLButtonElement>) => {
+          e.stopPropagation()
+          drop.onDrop(e)
+        },
+      }
     : {}
 
   return (
     <button
+      type="button"
       onClick={onClick}
       onContextMenu={onContextMenu}
       {...dropProps}
@@ -197,6 +211,7 @@ export function CategorySidebar({
           />
         ) : (
           <button
+            type="button"
             onClick={() => setShowNewInput(true)}
             className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-text-tertiary hover:text-accent hover:bg-overlay-2 transition-all border border-dashed border-overlay-6"
           >
@@ -215,6 +230,7 @@ export function CategorySidebar({
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             <button
+              type="button"
               onClick={() => {
                 const cat = categories.find((c) => c.id === contextMenu.id)
                 if (cat) {
@@ -230,6 +246,7 @@ export function CategorySidebar({
             </button>
             {onEditGlossary && (
               <button
+                type="button"
                 onClick={() => {
                   onEditGlossary(contextMenu.id)
                   setContextMenu(null)
@@ -241,6 +258,7 @@ export function CategorySidebar({
               </button>
             )}
             <button
+              type="button"
               onClick={() => {
                 onDeleteCategory(contextMenu.id)
                 setContextMenu(null)
@@ -290,6 +308,7 @@ export function SourceSidebar({
       {/* Source list */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1.5 space-y-0.5">
         <button
+          type="button"
           onClick={() => onSelect("")}
           className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-all text-left ${
             activeSource === ""
@@ -306,6 +325,7 @@ export function SourceSidebar({
 
         {sources.map((src) => (
           <button
+            type="button"
             key={src}
             onClick={() => onSelect(src)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-all text-left ${

@@ -13,6 +13,11 @@ from . import db
 from . import engine_bridge
 
 logger = logging.getLogger(__name__)
+TRANSLATION_SCHEMA = "chunk-index-v2"
+
+
+def _tm_context_tag(game: dict) -> str:
+    return f"game:{game.get('id')}:{game.get('engine', '')}:{TRANSLATION_SCHEMA}"
 
 
 class TranslationJob:
@@ -28,6 +33,9 @@ class TranslationJob:
         self._sse_queues: list[asyncio.Queue] = []
         self._sse_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._last_message = ""
+        self._last_message_key = ""
+        self._last_message_args = {}
         self._last_persisted_pct = 0.0  # 마지막 DB 저장 시점
         # Store project and resources for apply step
         self.project = None
@@ -101,10 +109,46 @@ def get_latest_game_job(game_id: int) -> Optional[TranslationJob]:
         return latest
 
 
+def mark_job_cancelled(job_id: str) -> bool:
+    """Mark an in-memory job as cancelled so UI state updates immediately."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return False
+    if job.status in ("completed", "cancelled", "error"):
+        return False
+    job.cancel_event.set()
+    job.status = "cancelled"
+    job._last_message = "Translation cancelled"
+    job._last_message_key = "cancelled"
+    job._last_message_args = {}
+    job.broadcast("cancelled", {
+        "message": job._last_message,
+        "status_message": job._last_message,
+        "message_key": job._last_message_key,
+    })
+    return True
+
+
+async def _finish_cancelled_prepare(job: TranslationJob, game: dict):
+    job.status = "cancelled"
+    job._last_message = "Translation cancelled"
+    job._last_message_key = "cancelled"
+    job._last_message_args = {}
+    await db.update_job(job.job_id, status="cancelled", error_message="")
+    await db.update_game(game["id"], status="idle")
+    job.broadcast("cancelled", {
+        "message": job._last_message,
+        "status_message": job._last_message,
+        "message_key": job._last_message_key,
+    })
+
+
 async def start_translation(game_id: int, provider: str, api_key: str,
                             model: str = "", source_lang: str = "auto",
                             target_lang: str = "ko",
                             preset_id: int = None,
+                            use_memory: bool = None,
                             start_index: int = None,
                             end_index: int = None) -> TranslationJob:
     """Start an async translation job for a game."""
@@ -125,6 +169,7 @@ async def start_translation(game_id: int, provider: str, api_key: str,
         _jobs[job_id] = job
 
     # Load preset if specified
+    requested_use_memory = use_memory
     use_memory = True
     preset_context = None
     if preset_id:
@@ -138,6 +183,8 @@ async def start_translation(game_id: int, provider: str, api_key: str,
             preset_context = preset
         else:
             logger.warning("Preset %s not found, continuing without preset", preset_id)
+    if requested_use_memory is not None:
+        use_memory = bool(requested_use_memory)
     job.use_memory = use_memory
     job.provider = provider
     job.model = model
@@ -152,92 +199,193 @@ async def start_translation(game_id: int, provider: str, api_key: str,
             api_keys = json.loads(api_keys)
         api_key = api_keys.get(provider, "")
 
-    # Extract strings — try engine bridge first, fall back to agent-saved strings
+    job.start_index = start_index
+    job.end_index = end_index
+    job._last_message = "Preparing translation..."
+    job._last_message_key = "preparing_translation"
+    job._last_message_args = {}
+    await db.create_job(job_id, game_id, 0)
+    await db.update_game(game_id, status="translating")
+    job.broadcast("progress", {
+        "progress": 0,
+        "translated": 0,
+        "total": 0,
+        "message": job._last_message,
+        "status_message": job._last_message,
+        "message_key": job._last_message_key,
+    })
+
+    asyncio.create_task(
+        _prepare_and_run_translation(job, game, provider, api_key, model, source_lang, target_lang)
+    )
+    return job
+
+async def _prepare_and_run_translation(job: TranslationJob, game: dict, provider: str,
+                                       api_key: str, model: str, source_lang: str,
+                                       target_lang: str = "ko"):
     try:
-        result = engine_bridge.extract_strings(
-            game["path"], game["engine"], source_lang, aes_key=game.get("aes_key", "")
+        await _prepare_and_run_translation_impl(
+            job, game, provider, api_key, model, source_lang, target_lang
+        )
+    except Exception as e:
+        logger.exception("Translation preparation failed for game %s (job %s): %s", game.get("id"), job.job_id, e)
+        job.status = "error"
+        job.error_message = str(e)
+        job._last_message = str(e)
+        job._last_message_key = ""
+        job._last_message_args = {}
+        try:
+            await db.update_job(job.job_id, status="error", error_message=str(e))
+            await db.update_game(job.game_id, status="idle")
+        except Exception:
+            logger.exception("Failed to persist preparation error for job %s", job.job_id)
+        job.broadcast("error", {"message": str(e), "status_message": str(e)})
+
+
+async def _prepare_and_run_translation_impl(job: TranslationJob, game: dict, provider: str,
+                                            api_key: str, model: str, source_lang: str,
+                                            target_lang: str = "ko"):
+    """Prepare extraction and TM after job creation so progress is visible immediately."""
+    try:
+        job._last_message = "Extracting strings..."
+        job._last_message_key = "extracting_strings"
+        job._last_message_args = {}
+        job.progress = 1
+        job.broadcast("progress", {
+            "progress": job.progress,
+            "translated": 0,
+            "total": 0,
+            "message": job._last_message,
+            "status_message": job._last_message,
+            "message_key": job._last_message_key,
+        })
+        await db.update_job(job.job_id, progress=job.progress)
+        result = await asyncio.to_thread(
+            engine_bridge.extract_strings,
+            game["path"],
+            game["engine"],
+            source_lang,
+            aes_key=game.get("aes_key", ""),
         )
         job.project = result["project"]
         job.total_strings = result["string_count"]
         job.resources = result.get("entries", [])
         if job.total_strings == 0:
             raise ValueError("No translatable strings found")
+        if job.cancel_event.is_set():
+            await _finish_cancelled_prepare(job, game)
+            return
     except Exception as extract_err:
-        # Fallback: check for agent-saved strings in project_json
-        saved_project = await db.get_project(game_id)
+        saved_project = await db.get_project(job.game_id)
         if saved_project and saved_project.get("project_json"):
             try:
                 saved_entries = json.loads(saved_project["project_json"])
-                if isinstance(saved_entries, list) and len(saved_entries) > 0:
-                    import ue_translator
-                    project = ue_translator.TranslationProject()
-                    project.game_path = game.get("path", "")
-                    project.engine_name = game.get("engine", "agent")
-                    project.entries = []
-                    for entry in saved_entries:
-                        if not isinstance(entry, dict):
-                            continue
-                        project.entries.append({
-                            "namespace": entry.get("namespace", ""),
-                            "key": entry.get("key", entry.get("file", "")),
-                            "original": entry.get("original", ""),
-                            "translated": entry.get("translated", ""),
-                            "status": entry.get("status", "pending"),
-                            "tag": entry.get("tag", ""),
-                            "safety": entry.get("safety", "safe"),
-                        })
-                    if project.entries:
-                        job.project = project
-                        job.total_strings = len(project.entries)
-                        job.resources = []
-                        logger.info(
-                            "Using %d agent-saved strings for game %s (engine extract failed: %s)",
-                            job.total_strings, game_id, extract_err,
-                        )
-                    else:
-                        raise extract_err
-                else:
+                if not isinstance(saved_entries, list) or not saved_entries:
                     raise extract_err
-            except (json.JSONDecodeError, TypeError, ImportError):
-                raise extract_err
+                import ue_translator
+                project = ue_translator.TranslationProject()
+                project.game_path = game.get("path", "")
+                project.engine_name = game.get("engine", "agent")
+                project.entries = []
+                for entry in saved_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    project.entries.append({
+                        "namespace": entry.get("namespace", ""),
+                        "key": entry.get("key", entry.get("file", "")),
+                        "original": entry.get("original", ""),
+                        "translated": entry.get("translated", ""),
+                        "status": entry.get("status", "pending"),
+                        "tag": entry.get("tag", ""),
+                        "safety": entry.get("safety", "safe"),
+                    })
+                if not project.entries:
+                    raise extract_err
+                job.project = project
+                job.total_strings = len(project.entries)
+                job.resources = []
+                if job.cancel_event.is_set():
+                    await _finish_cancelled_prepare(job, game)
+                    return
+                logger.info(
+                    "Using %d agent-saved strings for game %s (engine extract failed: %s)",
+                    job.total_strings, job.game_id, extract_err,
+                )
+            except Exception:
+                job.status = "error"
+                job.error_message = str(extract_err)
+                await db.update_job(job.job_id, status="error", error_message=str(extract_err))
+                await db.update_game(job.game_id, status="idle")
+                job.broadcast("error", {"message": str(extract_err), "status_message": str(extract_err)})
+                return
         else:
             job.status = "error"
             job.error_message = str(extract_err)
-            await db.create_job(job_id, game_id, 0)
-            await db.update_job(job_id, status="error", error_message=str(extract_err))
-            await db.update_game(game_id, status="idle")
-            job.broadcast("error", {"message": str(extract_err)})
-            return job
+            await db.update_job(job.job_id, status="error", error_message=str(extract_err))
+            await db.update_game(job.game_id, status="idle")
+            job.broadcast("error", {"message": str(extract_err), "status_message": str(extract_err)})
+            return
 
-    # Apply range filter if specified
-    job.start_index = start_index
-    job.end_index = end_index
-
-    # Save job to DB
-    await db.create_job(job_id, game_id, job.total_strings)
-    await db.update_game(game_id, status="translating")
-
-    # TM lookup before translation (if use_memory enabled)
     tm_cache = {}
-    if use_memory:
+    if job.cancel_event.is_set():
+        await _finish_cancelled_prepare(job, game)
+        return
+
+    if job.use_memory:
         try:
+            job._last_message = "Checking translation memory..."
+            job._last_message_key = "checking_translation_memory"
+            job._last_message_args = {}
+            job.progress = 3
+            job.broadcast("progress", {
+                "progress": job.progress,
+                "translated": 0,
+                "total": job.total_strings,
+                "message": job._last_message,
+                "status_message": job._last_message,
+                "message_key": job._last_message_key,
+            })
+            await db.update_job(job.job_id, total_strings=job.total_strings, progress=job.progress)
             _, pending_texts = job.project.get_pending_texts()
             if pending_texts:
                 tm_cache = await db.tm_lookup_batch(
-                    pending_texts, source_lang=source_lang, target_lang=target_lang
+                    pending_texts,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    context_tag=_tm_context_tag(game),
+                    game_id=game["id"],
                 )
         except Exception as e:
-            logger.warning("TM lookup failed for game %s: %s", game_id, e)
+            logger.warning("TM lookup failed for game %s: %s", job.game_id, e)
 
-    # Launch translation in background thread
-    thread = threading.Thread(
-        target=_run_translation,
-        args=(job, game, provider, api_key, model, source_lang, target_lang, tm_cache),
-        daemon=True,
+    if job.cancel_event.is_set():
+        await _finish_cancelled_prepare(job, game)
+        return
+
+    job._last_message = "Starting translation..."
+    job._last_message_key = "starting_translation"
+    job._last_message_args = {}
+    job.progress = 5
+    job.broadcast("progress", {
+        "progress": job.progress,
+        "translated": 0,
+        "total": job.total_strings,
+        "message": job._last_message,
+        "status_message": job._last_message,
+        "message_key": job._last_message_key,
+    })
+    await db.update_job(job.job_id, total_strings=job.total_strings, progress=job.progress)
+    await asyncio.to_thread(
+        _run_translation,
+        job,
+        game,
+        provider,
+        api_key,
+        model,
+        source_lang,
+        target_lang,
+        tm_cache,
     )
-    thread.start()
-
-    return job
 
 
 def _run_translation(job: TranslationJob, game: dict, provider: str,
@@ -289,14 +437,23 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
                 hit_indices = list(tm_hits.keys())
                 hit_translations = list(tm_hits.values())
                 project.apply_translations(hit_indices, hit_translations)
+                tm_progress = (len(tm_hits) / len(texts) * 100) if texts else 0
+                job.progress = max(job.progress, tm_progress)
+                job.translated_strings = len(tm_hits)
+                job._last_message = ""
+                job._last_message_key = "tm_cache_applied"
+                job._last_message_args = {"count": len(tm_hits)}
 
                 job.broadcast("progress", {
-                    "progress": round(len(tm_hits) / len(texts) * 100, 1),
+                    "progress": round(job.progress, 1),
                     "translated": len(tm_hits),
                     "total": len(texts),
                     "message_key": "tm_cache_applied",
                     "message_args": {"count": len(tm_hits)},
                 })
+                if job.progress - job._last_persisted_pct >= 1.0:
+                    job._last_persisted_pct = job.progress
+                    _persist_progress(job)
         else:
             ai_indices = list(indices)
             ai_texts = list(texts)
@@ -309,6 +466,9 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
             job.status = "completed"
             job.progress = 100
             job.translated_strings = tm_count
+            job._last_message = ""
+            job._last_message_key = "tm_cache_all_applied"
+            job._last_message_args = {"count": tm_count}
             job.broadcast("complete", {
                 "progress": 100,
                 "translated": tm_count,
@@ -390,7 +550,20 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
                 ratio = 0
             actual_done = tm_count + int(ratio * len(ai_texts))
             job.translated_strings = actual_done
-            job.progress = (actual_done / total_count * 100) if total_count > 0 else 0
+            completed_progress = (actual_done / total_count * 100) if total_count > 0 else 0
+
+            # translate_all reports chunk-start callbacks before the chunk is
+            # complete. Keep progress monotonic and expose a small active-work
+            # band while real translation is running but done_unique is still 0.
+            active_progress = job.progress
+            if total_chunks and chunk_idx and actual_done < total_count:
+                chunk_ratio = min(max(chunk_idx, 0), total_chunks) / total_chunks
+                active_progress = max(active_progress, 5.0 + (chunk_ratio * 10.0))
+
+            next_progress = max(job.progress, completed_progress, active_progress)
+            if total_count > 0 and actual_done < total_count:
+                next_progress = min(next_progress, 99.0)
+            job.progress = next_progress
 
             # Resolve current entry info for real-time display
             # status_msg 또는 eta_str이 있으면 message로 사용
@@ -403,6 +576,7 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
                 "translated": actual_done,
                 "total": total_count,
                 "message": display_msg,
+                "status_message": display_msg,
             }
             # Add current entry being translated
             if done_unique > 0 and done_unique <= len(ai_indices):
@@ -416,24 +590,29 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
                     current_data["current_translated"] = entry["translated"]
 
             job._last_message = display_msg
+            job._last_message_key = ""
+            job._last_message_args = {}
             job.broadcast("progress", current_data)
 
             # 5% 이상 변화 시 DB에 진행률 저장
-            if job.progress - job._last_persisted_pct >= 5.0 or job.progress >= 99.9:
+            if job.progress - job._last_persisted_pct >= 1.0 or job.progress >= 99.9:
                 job._last_persisted_pct = job.progress
                 _persist_progress(job)
 
         def chunk_done_callback(chunk_indices, chunk_translations):
-            project.apply_translations(chunk_indices, chunk_translations)
+            mapped_indices = []
+            mapped_translations = []
+            for input_idx, translation in zip(chunk_indices, chunk_translations):
+                if 0 <= input_idx < len(ai_indices):
+                    mapped_indices.append(ai_indices[input_idx])
+                    mapped_translations.append(translation)
+            if mapped_indices:
+                project.apply_translations(mapped_indices, mapped_translations)
             # Collect for TM save
-            for ci, ct in zip(chunk_indices, chunk_translations):
+            for input_idx, ct in zip(chunk_indices, chunk_translations):
                 if ct and ct.strip():
-                    # Find original text for this index
-                    try:
-                        pos = ai_indices.index(ci)
-                        new_translations.append((ai_texts[pos], ct))
-                    except ValueError:
-                        pass
+                    if 0 <= input_idx < len(ai_texts):
+                        new_translations.append((ai_texts[input_idx], ct))
 
         translations = translator.translate_all(
             ai_texts,
@@ -442,6 +621,18 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
             chunk_done_callback=chunk_done_callback,
             glossary=preset_glossary,
         )
+
+        if job.cancel_event.is_set():
+            raise InterruptedError("Translation cancelled")
+
+        final_indices = []
+        final_translations = []
+        for input_idx, translation in enumerate(translations):
+            if translation and translation.strip() and input_idx < len(ai_indices):
+                final_indices.append(ai_indices[input_idx])
+                final_translations.append(translation)
+        if final_indices:
+            project.apply_translations(final_indices, final_translations)
 
         # Collect any remaining translations not captured by chunk_done_callback
         if not new_translations:
@@ -483,14 +674,24 @@ def _run_translation(job: TranslationJob, game: dict, provider: str,
 
     except InterruptedError:
         job.status = "cancelled"
-        job.broadcast("cancelled", {"message": "Translation cancelled"})
+        job._last_message = "Translation cancelled"
+        job._last_message_key = "cancelled"
+        job._last_message_args = {}
+        job.broadcast("cancelled", {
+            "message": job._last_message,
+            "status_message": job._last_message,
+            "message_key": job._last_message_key,
+        })
         _finalize_job(job, game, status="cancelled")
 
     except Exception as e:
         logger.exception("Translation failed for game %s (job %s): %s", game.get("id"), job.job_id, e)
         job.status = "error"
         job.error_message = str(e)
-        job.broadcast("error", {"message": str(e)})
+        job._last_message = str(e)
+        job._last_message_key = ""
+        job._last_message_args = {}
+        job.broadcast("error", {"message": str(e), "status_message": str(e)})
         _finalize_job(job, game, status="error", error=str(e))
         # Write detailed context to crash.log for debugging
         _write_translation_crash(job, game, provider, model, e)
@@ -508,7 +709,7 @@ def _save_to_tm(job: TranslationJob, game: dict,
             "target_lang": target_lang,
             "provider": provider,
             "model": model,
-            "context_tag": game.get("engine", ""),
+            "context_tag": _tm_context_tag(game),
             "game_id": game["id"],
         }
         for src, tgt in new_translations
@@ -608,9 +809,6 @@ def _finalize_job(job: TranslationJob, game: dict,
             "status": game_status,
             "translated_count": job.translated_strings,
         }
-        # Sync string_count with actual translatable count so pct is accurate
-        if final_status == "completed" and job.total_strings > 0:
-            update_fields["string_count"] = job.total_strings
 
         await db.update_game(game["id"], **update_fields)
         # Save project JSON
@@ -620,6 +818,9 @@ def _finalize_job(job: TranslationJob, game: dict,
                 {k: v for k, v in e.items()}
                 for e in job.project.entries
             ]
+            for entry in entries:
+                if entry.get("translated") and entry.get("status") in ("translated", "reviewed"):
+                    entry["_translation_schema"] = TRANSLATION_SCHEMA
             await db.save_project(
                 game["id"],
                 json.dumps(entries, ensure_ascii=False),
@@ -684,9 +885,4 @@ def _run_auto_qa(job: TranslationJob, game: dict):
 
 
 def cancel_job(job_id: str) -> bool:
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-    if job and job.status == "running":
-        job.cancel_event.set()
-        return True
-    return False
+    return mark_job_cancelled(job_id)

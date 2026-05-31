@@ -94,6 +94,13 @@ class _PooledConnection:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self._conn:
+            if exc_type is not None:
+                try:
+                    await self._conn.rollback()
+                except Exception:
+                    await self._conn.close()
+                    self._conn = None
+                    return
             if self._is_temp:
                 await self._conn.close()
             else:
@@ -202,7 +209,8 @@ ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'windows';
 ALTER TABLE games ADD COLUMN package_name TEXT DEFAULT '';
 ALTER TABLE games ADD COLUMN original_path TEXT DEFAULT '';
 ALTER TABLE games ADD COLUMN variant_lang TEXT DEFAULT '';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tm_unique ON translation_memory(source_hash, source_lang, target_lang);
+DROP INDEX IF EXISTS idx_tm_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tm_unique ON translation_memory(source_hash, source_lang, target_lang, context_tag, game_id);
 ALTER TABLE games ADD COLUMN qa_error_count INTEGER DEFAULT 0;
 ALTER TABLE games ADD COLUMN qa_warning_count INTEGER DEFAULT 0;
 CREATE TABLE IF NOT EXISTS qa_results (
@@ -393,8 +401,39 @@ async def init_db():
             if stmt and not stmt.startswith("--"):
                 try:
                     await db.execute(stmt)
-                except Exception:
-                    pass  # column/index already exists
+                except Exception as e:
+                    # ALTER TABLE ADD COLUMN 이 두 번째 실행 시 "duplicate column"
+                    # 으로 실패하는 건 정상. 그 외 에러는 로깅 후 raise (조용히
+                    # 묻으면 vndb_id 같은 컬럼 누락 → 런타임 OperationalError).
+                    msg = str(e).lower()
+                    if "duplicate column" in msg or "already exists" in msg:
+                        continue
+                    print(f"[db.init_db] migration failed: {stmt[:80]}... -> {e}")
+                    raise
+        await db.commit()
+
+        # 방어적 검증: ALTER 이후에도 핵심 컬럼이 누락된 케이스(이전 빌드의
+        # silent except 로 인해 마이그레이션이 한 번도 적용 안 된 DB) 복구.
+        cur = await db.execute("PRAGMA table_info(games)")
+        existing_cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        recovery_alters = [
+            ("vndb_id",        "ALTER TABLE games ADD COLUMN vndb_id TEXT DEFAULT ''"),
+            ("dlsite_id",      "ALTER TABLE games ADD COLUMN dlsite_id TEXT DEFAULT ''"),
+            ("cover_source",   "ALTER TABLE games ADD COLUMN cover_source TEXT DEFAULT ''"),
+            ("preset_id",      "ALTER TABLE games ADD COLUMN preset_id INTEGER DEFAULT NULL"),
+            ("developer",      "ALTER TABLE games ADD COLUMN developer TEXT DEFAULT ''"),
+            ("platform",       "ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'windows'"),
+            ("package_name",   "ALTER TABLE games ADD COLUMN package_name TEXT DEFAULT ''"),
+            ("original_path",  "ALTER TABLE games ADD COLUMN original_path TEXT DEFAULT ''"),
+            ("variant_lang",   "ALTER TABLE games ADD COLUMN variant_lang TEXT DEFAULT ''"),
+            ("qa_error_count", "ALTER TABLE games ADD COLUMN qa_error_count INTEGER DEFAULT 0"),
+            ("qa_warning_count","ALTER TABLE games ADD COLUMN qa_warning_count INTEGER DEFAULT 0"),
+        ]
+        for col, sql in recovery_alters:
+            if col not in existing_cols:
+                print(f"[db.init_db] recovering missing column: games.{col}")
+                await db.execute(sql)
         await db.commit()
     finally:
         await db.close()
@@ -683,18 +722,30 @@ async def tm_lookup(source_text: str, source_lang: str = "ja", target_lang: str 
 
 
 async def tm_lookup_batch(texts: list[str], source_lang: str = "ja",
-                          target_lang: str = "ko") -> dict[str, dict]:
+                          target_lang: str = "ko",
+                          context_tag: str = "",
+                          game_id: int = None) -> dict[str, dict]:
     """Batch lookup. Returns {source_text: {translated_text, ...}}."""
     if not texts:
         return {}
     hashes = {_hash_text(t): t for t in texts}
     placeholders = ",".join("?" * len(hashes))
     async with get_db() as db:
+        params = list(hashes.keys()) + [source_lang, target_lang]
+        where = [
+            f"source_hash IN ({placeholders})",
+            "source_lang = ?",
+            "target_lang = ?",
+        ]
+        if context_tag:
+            where.append("context_tag = ?")
+            params.append(context_tag)
+        if game_id is not None:
+            where.append("game_id = ?")
+            params.append(game_id)
         rows = await db.execute_fetchall(
-            f"""SELECT * FROM translation_memory
-                WHERE source_hash IN ({placeholders})
-                AND source_lang = ? AND target_lang = ?""",
-            list(hashes.keys()) + [source_lang, target_lang],
+            f"SELECT * FROM translation_memory WHERE {' AND '.join(where)}",
+            params,
         )
         result = {}
         ids = []
@@ -721,8 +772,10 @@ async def tm_insert(source_text: str, translated_text: str,
     async with get_db() as db:
         # Upsert: update if exists
         existing = await db.execute_fetchall(
-            "SELECT id FROM translation_memory WHERE source_hash = ? AND source_lang = ? AND target_lang = ?",
-            (h, source_lang, target_lang),
+            """SELECT id FROM translation_memory
+               WHERE source_hash = ? AND source_lang = ? AND target_lang = ?
+               AND context_tag = ? AND game_id IS ?""",
+            (h, source_lang, target_lang, context_tag, game_id),
         )
         if existing:
             await db.execute(
@@ -742,8 +795,10 @@ async def tm_insert(source_text: str, translated_text: str,
             )
         await db.commit()
         rows = await db.execute_fetchall(
-            "SELECT * FROM translation_memory WHERE source_hash = ? AND source_lang = ? AND target_lang = ?",
-            (h, source_lang, target_lang),
+            """SELECT * FROM translation_memory
+               WHERE source_hash = ? AND source_lang = ? AND target_lang = ?
+               AND context_tag = ? AND game_id IS ?""",
+            (h, source_lang, target_lang, context_tag, game_id),
         )
         return dict(rows[0])
 
@@ -1052,6 +1107,39 @@ async def bulk_update_project_entries(
     await update_game(game_id, translated_count=translated_count)
 
     return updated
+
+
+async def reset_project_translations(game_id: int) -> int:
+    """Clear saved translations so a full retranslate cannot reuse shifted text."""
+    project_row = await get_project(game_id)
+    if not project_row:
+        return 0
+
+    try:
+        all_entries: list[dict] = json.loads(project_row["project_json"])
+    except (json.JSONDecodeError, TypeError):
+        return 0
+
+    reset_count = 0
+    for entry in all_entries:
+        if entry.get("translated") or entry.get("status") in ("translated", "reviewed"):
+            entry["translated"] = ""
+            entry["status"] = "pending"
+            entry["review_status"] = ""
+            entry.pop("_translation_schema", None)
+            reset_count += 1
+
+    if reset_count == 0:
+        return 0
+
+    await save_project(
+        game_id,
+        json.dumps(all_entries, ensure_ascii=False),
+        provider=project_row.get("provider", ""),
+        model=project_row.get("model", ""),
+    )
+    await update_game(game_id, status="idle", translated_count=0)
+    return reset_count
 
 
 # --- Media Folders ---
@@ -1915,7 +2003,6 @@ async def insert_subtitle_segments(subtitle_id: int, segments: list[dict]) -> in
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
-        await db.commit()
         # Update segment count on parent
         await db.execute(
             "UPDATE subtitles SET segment_count = ?, updated_at = ? WHERE id = ?",

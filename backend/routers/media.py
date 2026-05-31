@@ -60,6 +60,14 @@ def _validate_path(path: str) -> Path:
     return resolved
 
 
+def _is_relative_to(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _ext_to_type(ext: str) -> str:
     ext = ext.lower()
     if ext in _AUDIO_EXT:
@@ -190,10 +198,9 @@ async def serve_file(game_id: int, path: str):
 
     # Verify the file belongs to a registered folder
     folders = await db.media_list_folders(game_id)
-    file_str = str(resolved)
     authorized = False
     for folder in folders:
-        if file_str.startswith(folder["folder_path"]):
+        if _is_relative_to(resolved, Path(folder["folder_path"])):
             authorized = True
             break
     if not authorized:
@@ -294,10 +301,9 @@ async def translate_script(game_id: int, body: TranslateScriptRequest):
 
     # Verify file belongs to a registered folder
     folders = await db.media_list_folders(game_id)
-    file_str = str(resolved)
     authorized = False
     for folder in folders:
-        if file_str.startswith(folder["folder_path"]):
+        if _is_relative_to(resolved, Path(folder["folder_path"])):
             authorized = True
             break
     if not authorized:

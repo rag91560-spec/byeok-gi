@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import contextlib
 import shutil
 import subprocess
 import uuid
@@ -286,16 +287,18 @@ async def upload_video(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
-    chunks = []
     total = 0
-    while chunk := await file.read(8192):
-        total += len(chunk)
-        if total > MAX_VIDEO_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large (max 500MB)")
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    with open(dest, "wb") as f:
-        f.write(content)
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_VIDEO_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large (max 500MB)")
+                f.write(chunk)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(dest)
+        raise
     title = os.path.splitext(file.filename or "video")[0]
     abs_dest = os.path.abspath(dest)
     video = await db.create_video(
@@ -304,7 +307,7 @@ async def upload_video(file: UploadFile = File(...)):
         source=abs_dest,
         thumbnail="",
         duration=probe_media_duration(abs_dest),
-        size=len(content),
+        size=total,
         sort_order=0,
     )
     # Auto-extract thumbnail

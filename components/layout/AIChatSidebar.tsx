@@ -14,7 +14,6 @@ import { useAIChat } from "@/hooks/use-ai-chat"
 import { useGame } from "@/hooks/use-api"
 import { useLocale } from "@/hooks/use-locale"
 import { AgentLogEntry } from "@/components/game-detail/AgentLogEntry"
-import { cn } from "@/lib/utils"
 
 export function AIChatSidebar() {
   const { t } = useLocale()
@@ -31,12 +30,11 @@ export function AIChatSidebar() {
     setSelectedModel,
     maxTurns,
     setMaxTurns,
-    startAgent,
     cancelAgent,
     sendMessage,
   } = useAIChat()
 
-  const { game } = useGame(gameId ?? 0)
+  const { game } = useGame(gameId)
   const [inputText, setInputText] = useState("")
   const [showConfig, setShowConfig] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -71,7 +69,7 @@ export function AIChatSidebar() {
     if (isIdle || isDone) {
       if (!hasAnyKey || !gameId) return
       setInputText("")
-      // Start agent — instructions will be the user's text
+      // Start agent; instructions will be the user's text.
       const ap = availableProviders.find((p) => p.provider.id === selectedProviderId)
       if (!ap) return
       const providerName = selectedProviderId === "claude_api" ? "claude" : selectedProviderId
@@ -110,7 +108,7 @@ export function AIChatSidebar() {
         {isActive && (
           <span className="flex items-center gap-1 text-[11px] text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            {agent.status === "waiting" ? "대기 중" : t("aiAgentRunning")}
+            {agent.status === "waiting" ? "Waiting" : t("aiAgentRunning")}
           </span>
         )}
 
@@ -137,12 +135,12 @@ export function AIChatSidebar() {
             <span className="text-text-tertiary">({game.engine})</span>
           )}
           {(!game.engine || game.engine === "unknown") && (
-            <span className="text-purple-400 text-[10px] px-1 py-0.5 rounded bg-purple-500/15">미감지</span>
+            <span className="text-purple-400 text-[10px] px-1 py-0.5 rounded bg-purple-500/15">Undetected</span>
           )}
         </div>
       ) : (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-overlay-2 border-b border-border-subtle text-xs text-text-tertiary shrink-0">
-          게임을 선택하면 AI가 해당 게임을 분석합니다
+          Select a game to let AI analyze it.
         </div>
       )}
 
@@ -151,10 +149,10 @@ export function AIChatSidebar() {
         <div className="shrink-0 border-b border-border-subtle p-3 space-y-2 bg-overlay-2/50">
           {/* Provider selector */}
           <div>
-            <label className="text-[11px] font-medium text-text-tertiary">AI 프로바이더</label>
+            <label className="text-[11px] font-medium text-text-tertiary">AI Provider</label>
             {availableProviders.length === 0 ? (
               <p className="text-[11px] text-yellow-500 mt-0.5">
-                설정에서 API 키를 먼저 등록하세요
+                Add an API key in Settings first.
               </p>
             ) : (
               <select
@@ -203,7 +201,7 @@ export function AIChatSidebar() {
           {/* API key hint */}
           {currentProvider && (
             <p className="text-[10px] text-text-tertiary">
-              {currentProvider.provider.name} 키 등록됨 ({currentProvider.apiKey.slice(0, 8)}...)
+              {currentProvider.provider.name} key configured
             </p>
           )}
         </div>
@@ -250,7 +248,7 @@ export function AIChatSidebar() {
             <p className="text-text-tertiary text-xs max-w-[260px]">
               {gameId
                 ? t("aiAgentDesc")
-                : "게임 상세 페이지에서 AI 분석을 시작할 수 있습니다"}
+                : "Open a game detail page to start AI analysis."}
             </p>
             {!hasAnyKey && (
               <p className="text-yellow-500/70 text-[11px]">{t("aiAgentNoKey")}</p>
@@ -276,7 +274,7 @@ export function AIChatSidebar() {
       <div className="shrink-0 border-t border-border-subtle bg-overlay-2/30 p-2">
         {agent.status === "waiting" && (
           <p className="text-[10px] text-yellow-400/70 mb-1 px-1">
-            AI가 응답을 기다리고 있습니다
+            AI is waiting for your response.
           </p>
         )}
 
@@ -286,17 +284,7 @@ export function AIChatSidebar() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={
-              !gameId
-                ? "게임을 먼저 선택하세요"
-                : !hasAnyKey
-                  ? "API 키를 설정에서 등록하세요"
-                  : isActive
-                    ? agent.status === "waiting"
-                      ? "메시지를 입력하세요..."
-                      : "AI가 작업 중..."
-                    : "분석할 내용을 입력하세요..."
-            }
+            placeholder={!gameId ? "Open a game to start chatting" : !hasAnyKey ? "Add an API key in Settings" : isActive ? (agent.status === "waiting" ? "Waiting for response..." : "AI is working...") : "Ask the agent anything..."}
             disabled={!gameId || !hasAnyKey || (!isIdle && !isActive && !isDone)}
             rows={1}
             className="flex-1 px-2.5 py-1.5 text-xs bg-[#0d1117] border border-border-subtle rounded-md focus:outline-none focus:ring-1 focus:ring-accent resize-none placeholder:text-text-tertiary/50 disabled:opacity-40"
@@ -317,7 +305,7 @@ export function AIChatSidebar() {
         {/* Bottom bar: provider + model */}
         <div className="flex items-center gap-2 mt-1.5 px-1 text-[10px] text-text-tertiary">
           {currentProvider && (
-            <span className="font-mono">{currentProvider.provider.name} · {modelShort}</span>
+            <span className="font-mono">{currentProvider.provider.name} - {modelShort}</span>
           )}
           {isDone && agent.status === "completed" && (
             <span className="text-emerald-400 ml-auto">{t("aiAgentComplete")}</span>

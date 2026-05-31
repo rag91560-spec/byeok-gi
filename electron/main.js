@@ -2,6 +2,8 @@ const { app, BrowserWindow, shell, ipcMain, dialog, desktopCapturer, globalShort
 const path = require("path")
 const { spawn, fork } = require("child_process")
 const http = require("http")
+const net = require("net")
+const fs = require("fs")
 const { autoUpdater } = require("electron-updater")
 
 // EPIPE 완전 차단 — Electron에서 부모 파이프 닫힌 후 stdout/stderr write 시 발생
@@ -16,12 +18,15 @@ process.on("uncaughtException", (err) => {
 const isDev = !app.isPackaged
 const ROOT = path.join(__dirname, "..")
 const BACKEND_PORT = 8000
-const FRONTEND_PORT = 3100
+const DEFAULT_FRONTEND_PORT = 3100
+let frontendPort = DEFAULT_FRONTEND_PORT
 
 // userData 경로를 고정 — NSIS installer와 일치시키기 위해
 // app.getPath("userData")는 productName("게임번역기")을 사용하지만
 // 영문 경로로 통일하여 한국어 경로 문제 방지
-if (!isDev) {
+if (isDev) {
+  app.setPath("userData", path.join(app.getPath("temp"), `game-translator-dev-${process.pid}`))
+} else {
   app.setPath("userData", path.join(app.getPath("appData"), "game-translator"))
 }
 
@@ -36,27 +41,96 @@ let trackingWindowId = null
 
 // ── Helpers ──
 
+function appendDevLog(name, data) {
+  if (!isDev) return
+  try {
+    const logDir = path.join(ROOT, "logs")
+    fs.mkdirSync(logDir, { recursive: true })
+    fs.appendFileSync(path.join(logDir, name), data)
+  } catch {}
+}
+
 function isPortInUse(port) {
   return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${port}`, () => resolve(true))
-    req.on("error", () => resolve(false))
+    const socket = new net.Socket()
+    let settled = false
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(value)
+    }
+    socket.setTimeout(1000)
+    socket.once("connect", () => finish(true))
+    socket.once("timeout", () => finish(false))
+    socket.once("error", () => finish(false))
+    socket.connect(port, "127.0.0.1")
+  })
+}
+
+function isHttpReady(url, timeout = 2000) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const req = http.get(url, (res) => {
+      res.resume()
+      finish(res.statusCode >= 200 && res.statusCode < 500)
+    })
+    req.setTimeout(timeout, () => {
+      req.destroy()
+      finish(false)
+    })
+    req.on("error", () => finish(false))
     req.end()
+  })
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function findAvailablePort(start, end) {
+  for (let port = start; port <= end; port += 1) {
+    if (!(await isPortInUse(port))) return port
+  }
+  return null
+}
+
+function waitForHttp(url, label, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now()
+    const check = async () => {
+      if (await isHttpReady(url)) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - start > timeout) {
+        reject(new Error(`Timeout waiting for ${label}`))
+        return
+      }
+      setTimeout(check, 500)
+    }
+    check()
   })
 }
 
 function waitForServer(port, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const start = Date.now()
-    const check = () => {
-      const req = http.get(`http://localhost:${port}`, () => resolve(true))
-      req.on("error", () => {
-        if (Date.now() - start > timeout) {
-          reject(new Error(`Timeout waiting for port ${port}`))
-        } else {
-          setTimeout(check, 500)
-        }
-      })
-      req.end()
+    const check = async () => {
+      if (await isPortInUse(port)) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - start > timeout) {
+        reject(new Error(`Timeout waiting for port ${port}`))
+        return
+      }
+      setTimeout(check, 500)
     }
     check()
   })
@@ -109,8 +183,12 @@ function findPython() {
 // ── Server Management ──
 
 async function startBackend() {
+  if (await isHttpReady(`http://127.0.0.1:${BACKEND_PORT}/api/health`)) {
+    console.log("[electron] Backend health is OK on port", BACKEND_PORT)
+    return
+  }
   if (await isPortInUse(BACKEND_PORT)) {
-    console.log("[electron] Backend already running on port", BACKEND_PORT)
+    console.log("[electron] Backend port is occupied but health check is not ready", BACKEND_PORT)
     return
   }
   console.log("[electron] Starting backend...")
@@ -131,7 +209,11 @@ async function startBackend() {
         "--port", String(BACKEND_PORT),
         "--reload",
       ],
-      { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } }
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, GT_DATA_DIR: path.join(ROOT, "data") },
+      }
     )
   } else {
     // Production: run PyInstaller-built backend.exe
@@ -194,8 +276,8 @@ async function startBackend() {
       }
     )
   }
-  backendProcess.stdout?.on("data", () => {})
-  backendProcess.stderr?.on("data", () => {})
+  backendProcess.stdout?.on("data", (data) => appendDevLog("backend-dev.out.log", data))
+  backendProcess.stderr?.on("data", (data) => appendDevLog("backend-dev.err.log", data))
   backendProcess.stdout?.on("error", () => {})
   backendProcess.stderr?.on("error", () => {})
   backendProcess.on("error", (err) => {
@@ -221,15 +303,57 @@ async function startBackend() {
 }
 
 async function startFrontend() {
-  if (await isPortInUse(FRONTEND_PORT)) {
-    console.log("[electron] Frontend already running on port", FRONTEND_PORT)
+  frontendPort = DEFAULT_FRONTEND_PORT
+  const frontendReadyUrl = (port) => `http://127.0.0.1:${port}/`
+
+  if (await isHttpReady(frontendReadyUrl(frontendPort))) {
+    console.log("[electron] Frontend HTTP is ready on port", frontendPort)
     return
+  }
+  if (isDev && process.env.GT_EXTERNAL_FRONTEND === "1") {
+    console.log("[electron] Using external frontend on port", frontendPort)
+    return
+  }
+  if (await isPortInUse(frontendPort)) {
+    console.log("[electron] Frontend port is occupied but HTTP is not ready", frontendPort)
+    const start = Date.now()
+    while (Date.now() - start < 5000) {
+      await delay(500)
+      if (await isHttpReady(frontendReadyUrl(frontendPort))) {
+        console.log("[electron] Frontend HTTP became ready on port", frontendPort)
+        return
+      }
+      if (!(await isPortInUse(frontendPort))) break
+    }
+    if (await isPortInUse(frontendPort)) {
+      console.log("[electron] Frontend port stayed occupied without HTTP", frontendPort)
+      if (!isDev) return
+      const fallbackPort = await findAvailablePort(DEFAULT_FRONTEND_PORT + 1, DEFAULT_FRONTEND_PORT + 10)
+      if (!fallbackPort) {
+        console.log("[electron] No fallback frontend port is available")
+        return
+      }
+      frontendPort = fallbackPort
+      console.log("[electron] Using fallback frontend port", frontendPort)
+    }
   }
   console.log("[electron] Starting frontend...")
   if (isDev) {
+    const nextBin = path.join(ROOT, "node_modules", "next", "dist", "bin", "next")
     frontendProcess = spawn(
-      "npm", ["run", "dev", "--", "--port", String(FRONTEND_PORT)],
-      { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], shell: true }
+      "node", [nextBin, "dev", "--webpack", "--hostname", "127.0.0.1", "--port", String(frontendPort)],
+      {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          HOSTNAME: "127.0.0.1",
+          NEXT_TELEMETRY_DISABLED: "1",
+          NEXT_DEV_DIST_DIR: ".next-electron-dev",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+      }
     )
   } else {
     // Production: run Next.js standalone server
@@ -237,22 +361,67 @@ async function startFrontend() {
     frontendProcess = fork(serverJs, [], {
       env: {
         ...process.env,
-        PORT: String(FRONTEND_PORT),
-        HOSTNAME: "localhost",
+        PORT: String(frontendPort),
+        HOSTNAME: "127.0.0.1",
         NODE_ENV: "production",
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     })
   }
   // 파이프 읽되 에러 무시 (EPIPE 방지)
-  frontendProcess.stdout?.on("data", () => {})
-  frontendProcess.stderr?.on("data", () => {})
+  frontendProcess.stdout?.on("data", (data) => appendDevLog("frontend-dev.out.log", data))
+  frontendProcess.stderr?.on("data", (data) => appendDevLog("frontend-dev.err.log", data))
   frontendProcess.stdout?.on("error", () => {})
   frontendProcess.stderr?.on("error", () => {})
-  frontendProcess.on("error", () => {})
+  frontendProcess.on("error", (error) => {
+    appendDevLog("frontend-dev.err.log", `[electron] Frontend process error: ${error.message}\n`)
+  })
+  frontendProcess.on("exit", (code, signal) => {
+    appendDevLog(
+      "frontend-dev.err.log",
+      `[electron] Frontend process exited. code=${code ?? "null"} signal=${signal ?? "null"}\n`
+    )
+    frontendProcess = null
+  })
 }
 
 // ── Window ──
+
+function startupPageUrl(message = "Starting Game Translator...", detail = "Launching local development services.") {
+  return `data:text/html;charset=utf-8,
+    <html><head><title>Game Translator Dev</title></head><body style="background:#0c0c0f;color:#e0e0e0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:14px">
+      <h2 style="margin:0;font-size:20px">${message}</h2>
+      <p style="color:#888;font-size:14px;margin:0">${detail}</p>
+    </body></html>`
+}
+
+async function loadFrontendWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const appUrl = `http://127.0.0.1:${frontendPort}/`
+  console.log("[electron] Loading frontend URL:", appUrl)
+  try {
+    await mainWindow.loadURL(appUrl)
+  } catch (error) {
+    console.error("[electron] Frontend loadURL failed:", error.message)
+    showStartupError(error.message)
+    return
+  }
+  mainWindow.show()
+}
+
+function showStartupError(errorDesc = "Unknown error") {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.show()
+  mainWindow.webContents.loadURL(`data:text/html;charset=utf-8,
+    <html><head><title>Game Translator Dev</title></head><body style="background:#0c0c0f;color:#e0e0e0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:16px">
+      <h2>Development server is not ready</h2>
+      <p style="color:#888;font-size:14px">Electron opened, but the local frontend did not finish loading. (${errorDesc})</p>
+      <button onclick="location.href='http://localhost:${frontendPort}'"
+        style="margin-top:8px;padding:8px 20px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">
+        Retry
+      </button>
+    </body></html>`)
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -263,6 +432,7 @@ function createWindow() {
     backgroundColor: "#0c0c0f",
     icon: path.join(__dirname, "..", "build", "icon.png"),
     show: false,
+    title: "Game Translator Dev",
     acceptFirstMouse: true,
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -277,14 +447,17 @@ function createWindow() {
     },
   })
 
-  mainWindow.loadURL(`http://localhost:${FRONTEND_PORT}`)
+  mainWindow.loadURL(startupPageUrl())
 
   // Show window when ready, with timeout fallback
   let shown = false
   const showOnce = () => {
     if (shown || !mainWindow) return
     shown = true
+    console.log("[electron] Showing main window")
     mainWindow.show()
+    mainWindow.restore()
+    mainWindow.focus()
   }
 
   mainWindow.once("ready-to-show", showOnce)
@@ -301,7 +474,7 @@ function createWindow() {
         <h2>서버 시작 실패</h2>
         <p style="color:#888;font-size:14px">프론트엔드 서버에 연결할 수 없습니다 (${errorDesc})</p>
         <p style="color:#666;font-size:12px">Python이 설치되어 있는지 확인하고, 앱을 재시작해주세요.</p>
-        <button onclick="location.href='http://localhost:${FRONTEND_PORT}'"
+        <button onclick="location.href='http://localhost:${frontendPort}'"
           style="margin-top:8px;padding:8px 20px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">
           다시 시도
         </button>
@@ -318,6 +491,18 @@ function createWindow() {
       }
       .sidebar-drag-region a,
       .sidebar-drag-region button {
+        -webkit-app-region: no-drag;
+      }
+      main,
+      nav,
+      a,
+      button,
+      input,
+      textarea,
+      select,
+      label,
+      [role="button"],
+      [role="link"] {
         -webkit-app-region: no-drag;
       }
       /* Push sidebar down for titlebar overlay */
@@ -355,11 +540,15 @@ function createWindow() {
 
   // External links open in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http")) {
-      shell.openExternal(url)
-      return { action: "deny" }
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+        shell.openExternal(url)
+      }
+    } catch {
+      console.warn("[electron] Blocked malformed window URL:", url)
     }
-    return { action: "allow" }
+    return { action: "deny" }
   })
 
   mainWindow.on("closed", () => {
@@ -498,12 +687,48 @@ ipcMain.handle("select-audio-folder", async () => {
   return result.filePaths[0] || ""
 })
 
+ipcMain.handle("launch-native-game", async (event, { exePath }) => {
+  if (!exePath || typeof exePath !== "string") {
+    throw new Error("Missing executable path")
+  }
+
+  const fs = require("fs")
+  if (!fs.existsSync(exePath)) {
+    throw new Error(`Executable not found: ${exePath}`)
+  }
+
+  const cwd = path.dirname(exePath)
+  const child = spawn(exePath, [], {
+    cwd,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  })
+  child.unref()
+  return { ok: true, pid: child.pid }
+})
+
 // HTML game window
-ipcMain.handle("open-html-game", (event, { gameId, title, serveUrl }) => {
+ipcMain.handle("open-html-game", async (event, { gameId, title, serveUrl }) => {
   const existing = gameWindows.get(gameId)
   if (existing && !existing.isDestroyed()) {
     existing.focus()
     return
+  }
+
+  // 방어선: 이 게임에 네이티브 exe가 있으면 BrowserWindow로 열지 않음
+  // (백엔드가 이미 subprocess.Popen으로 실행했어야 함)
+  try {
+    const res = await fetch(`http://localhost:${BACKEND_PORT}/api/games/${gameId}`)
+    if (res.ok) {
+      const g = await res.json()
+      if (g?.exe_path) {
+        console.warn(`[open-html-game] refused — game ${gameId} has exe_path=${g.exe_path}`)
+        return
+      }
+    }
+  } catch (e) {
+    console.warn(`[open-html-game] exe_path probe failed:`, e?.message || e)
   }
 
   const win = new BrowserWindow({
@@ -624,7 +849,7 @@ ipcMain.handle("live:show-overlay", (event, { bounds }) => {
 
   // Windows: setIgnoreMouseEvents(true) makes all clicks pass through
   overlayWindow.setIgnoreMouseEvents(true)
-  overlayWindow.loadURL(`http://localhost:${FRONTEND_PORT}/overlay`)
+  overlayWindow.loadURL(`http://localhost:${frontendPort}/overlay`)
 
   // Inject transparent background override (ensure no white flash)
   overlayWindow.webContents.on("did-finish-load", () => {
@@ -680,7 +905,7 @@ ipcMain.handle("live:select-region", async () => {
       },
     })
 
-    regionSelectWindow.loadURL(`http://localhost:${FRONTEND_PORT}/region-select`)
+    regionSelectWindow.loadURL(`http://localhost:${frontendPort}/region-select`)
 
     ipcMain.once("live:region-selected", (e, region) => {
       if (regionSelectWindow && !regionSelectWindow.isDestroyed()) {
@@ -839,7 +1064,7 @@ function cleanup() {
   // Fallback: kill orphaned processes by port (handles shell-spawned children)
   if (isDev) {
     killByPort(BACKEND_PORT)
-    killByPort(FRONTEND_PORT)
+    killByPort(frontendPort)
   }
   backendProcess = null
   frontendProcess = null
@@ -885,8 +1110,7 @@ async function ensureOcrLanguagePacks() {
 }
 
 app.whenReady().then(async () => {
-  // Install OCR language packs in background (non-blocking)
-  ensureOcrLanguagePacks().catch(() => {})
+  createWindow()
 
   await startBackend()
   await startFrontend()
@@ -894,19 +1118,24 @@ app.whenReady().then(async () => {
   console.log("[electron] Waiting for servers...")
   try {
     await Promise.all([
-      waitForServer(BACKEND_PORT, 30000),
-      waitForServer(FRONTEND_PORT, 30000),
+      waitForHttp(`http://127.0.0.1:${BACKEND_PORT}/api/health`, "backend health", 30000),
+      waitForHttp(
+        isDev
+          ? `http://127.0.0.1:${frontendPort}/_next/static/development/_buildManifest.js`
+          : `http://127.0.0.1:${frontendPort}`,
+        "frontend HTTP",
+        30000
+      ),
     ])
   } catch (err) {
     console.error("[electron] Server startup failed:", err.message)
-    // Still create window to show error instead of silently quitting
-    createWindow()
+    showStartupError(err.message)
     setupAutoUpdater()
     return
   }
 
   console.log("[electron] Servers ready, opening window")
-  createWindow()
+  await loadFrontendWindow()
   setupAutoUpdater()
 
   // Load kill hotkey from settings

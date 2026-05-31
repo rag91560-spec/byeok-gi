@@ -126,6 +126,12 @@ export function TranslationPanel({
     } catch (e) { console.error("TM import failed:", e) }
   }, [gameId, t])
 
+  const rawProgress = progress.progress ?? 0
+  const progressPct = Math.max(0, Math.min(100, rawProgress <= 1 ? rawProgress * 100 : rawProgress))
+  const translatedCount = progress.translated ?? 0
+  const totalCount = progress.total ?? 0
+  const hasProgress = isTranslating || progressPct > 0 || totalCount > 0 || Boolean(txMessage)
+
   return (
     <div className="rounded-lg p-5 bg-overlay-2 border border-overlay-6">
       <div className="flex items-center gap-2 mb-4">
@@ -169,6 +175,31 @@ export function TranslationPanel({
           {t("qualityCompare")}
         </p>
       </div>
+
+      {hasProgress && (
+        <div className="mb-4 rounded-lg bg-overlay-3 border border-overlay-6 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 text-xs mb-2">
+            <span className="min-w-0 truncate text-text-secondary">
+              {txMessage || t("translationProgress")}
+            </span>
+            <span className="shrink-0 font-mono text-text-primary">
+              {Math.round(progressPct)}%
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-overlay-6">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-300"
+              style={{ width: `${isTranslating ? Math.max(progressPct, 2) : progressPct}%` }}
+            />
+          </div>
+          {totalCount > 0 && (
+            <div className="mt-2 flex justify-between gap-3 text-[11px] text-text-tertiary">
+              <span>{translatedCount.toLocaleString()} / {totalCount.toLocaleString()}</span>
+              <span>{Math.max(0, totalCount - translatedCount).toLocaleString()} left</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Offline tab */}
       {tab === "offline" && (

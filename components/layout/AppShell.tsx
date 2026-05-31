@@ -3,12 +3,10 @@
 import { useState, useCallback, type DragEvent } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Sidebar } from "./Sidebar"
-import { AIChatSidebar } from "./AIChatSidebar"
-import { AIChatToggle } from "./AIChatToggle"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { SyncWorker } from "@/components/SyncWorker"
-import { AIChatProvider } from "@/hooks/use-ai-chat"
 import { useLocale } from "@/hooks/use-locale"
+import { AIChatProvider } from "@/hooks/use-ai-chat"
 
 /** Routes that render without Sidebar/UpdateBanner (standalone windows) */
 const BARE_ROUTES = ["/overlay", "/region-select"]
@@ -16,6 +14,7 @@ const BARE_ROUTES = ["/overlay", "/region-select"]
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".avi", ".webm", ".mov", ".srt", ".ass", ".vtt"])
 const AUDIO_EXTS = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus"])
 const MANGA_EXTS = new Set([".jpg", ".jpeg", ".png", ".bmp", ".webp"])
+const INTERNAL_DND_TYPES = new Set(["application/x-media-item", "application/x-game-id"])
 
 function getExt(name: string): string {
   const i = name.lastIndexOf(".")
@@ -25,12 +24,20 @@ function getExt(name: string): string {
 function getRouteForFile(file: File): string | null {
   const ext = getExt(file.name)
   // Check if it's a folder (webkitRelativePath or no extension in Electron)
-  if ((file as any).path && !ext) return "/library"
+  if ((file as File & { path?: string }).path && !ext) return "/library"
   if (VIDEO_EXTS.has(ext)) return "/videos"
   if (AUDIO_EXTS.has(ext)) return "/audio"
   if (MANGA_EXTS.has(ext)) return "/manga"
   if (ext === ".txt") return "/library"
   return null
+}
+
+function getDragTypes(e: DragEvent): string[] {
+  return Array.from(e.dataTransfer.types)
+}
+
+function isInternalDrag(types: string[]): boolean {
+  return types.some((type) => INTERNAL_DND_TYPES.has(type))
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -41,9 +48,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dragOver, setDragOver] = useState(false)
 
   const handleDragOver = useCallback((e: DragEvent) => {
-    const types = e.dataTransfer.types
+    const types = getDragTypes(e)
     // Skip internal media DnD (cards between folders)
-    if (types.includes("application/x-media-item") || types.includes("application/x-game-id")) {
+    if (isInternalDrag(types)) {
       return
     }
     // Only handle external file drops
@@ -64,6 +71,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   const handleDrop = useCallback((e: DragEvent) => {
+    const types = getDragTypes(e)
+    if (isInternalDrag(types)) {
+      return
+    }
+
     e.preventDefault()
     e.stopPropagation()
     setDragOver(false)
@@ -105,9 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <UpdateBanner />
           <SyncWorker />
           <main className="flex-1 min-w-0">{children}</main>
-          <AIChatToggle />
         </div>
-        <AIChatSidebar />
       </div>
     </AIChatProvider>
   )

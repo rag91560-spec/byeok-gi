@@ -12,10 +12,15 @@ function _resolveSSEMessage(data: Record<string, unknown>): string {
   const key = data.message_key as string | undefined
   if (key) {
     const keyMap: Record<string, TranslationKey> = {
+      preparing_translation: "preparingTranslation",
+      extracting_strings: "extractingStrings",
+      checking_translation_memory: "checkingTranslationMemory",
+      starting_translation: "startingTranslation",
       tm_cache_applied: "tmCacheApplied",
       tm_cache_all_applied: "tmCacheAllApplied",
       tm_saved: "tmSaved",
       tm_save_failed: "tmSaveFailed",
+      cancelled: "cancelled",
     }
     const tKey = keyMap[key]
     if (tKey) {
@@ -30,7 +35,7 @@ function _resolveSSEMessage(data: Record<string, unknown>): string {
       return msg
     }
   }
-  return (data.message as string) || ""
+  return (data.status_message as string) || (data.message as string) || ""
 }
 
 // --- useGames ---
@@ -41,6 +46,7 @@ export function useGames(search?: string) {
   const [error, setError] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState(search)
   const hasLoadedRef = useRef(false)
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300)
@@ -48,17 +54,20 @@ export function useGames(search?: string) {
   }, [search])
 
   const refresh = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     // Only show spinner on the very first load — subsequent refreshes keep stale content
     if (!hasLoadedRef.current) setLoading(true)
     setError("")
     try {
       const data = await api.games.list(debouncedSearch)
+      if (requestId !== requestIdRef.current) return
       setGames(data)
       hasLoadedRef.current = true
     } catch (e: unknown) {
+      if (requestId !== requestIdRef.current) return
       setError(e instanceof Error ? e.message : "Failed to load games")
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [debouncedSearch])
 
@@ -75,18 +84,27 @@ export function useGame(id: number | null) {
   const [game, setGame] = useState<Game | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
-    if (id === null) return
+    const requestId = ++requestIdRef.current
+    if (id === null) {
+      setGame(null)
+      setLoading(false)
+      setError("")
+      return
+    }
     setLoading(true)
     setError("")
     try {
       const data = await api.games.get(id)
+      if (requestId !== requestIdRef.current) return
       setGame(data)
     } catch (e: unknown) {
+      if (requestId !== requestIdRef.current) return
       setError(e instanceof Error ? e.message : "Failed to load game")
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [id])
 
@@ -191,37 +209,54 @@ export function useTranslationProgress(gameId: number | null) {
     if (gameId === null) return
     stopPolling()
     let idleCount = 0
+    let failureCount = 0
 
     const poll = async () => {
       try {
         const res = await fetch(api.translate.pollUrl(gameId))
-        if (!res.ok) return
+        if (!res.ok) {
+          failureCount++
+          if (failureCount >= 3) {
+            setMessage(`Progress polling failed (${res.status})`)
+            setStatus("error")
+            stopPolling()
+          }
+          return
+        }
+        failureCount = 0
         const data = await res.json()
+        const normalizedStatus =
+          data.status === "queued" || data.status === "pending" || data.status === "starting" || data.status === "processing"
+            ? "running"
+            : data.status
 
-        if (data.status === "running") {
+        if (normalizedStatus === "running") {
           idleCount = 0
-          setProgress({
-            progress: data.progress ?? 0,
-            translated: data.translated ?? 0,
-            total: data.total ?? 0,
-          })
+          setProgress((prev) => ({
+            ...prev,
+            ...data,
+            progress: data.progress ?? prev.progress ?? 0,
+            translated: data.translated ?? prev.translated ?? 0,
+            total: data.total ?? prev.total ?? 0,
+          }))
           setStatus("running")
-          if (data.message) setMessage(data.message)
-        } else if (data.status === "completed") {
+          setMessage(_resolveSSEMessage(data))
+        } else if (normalizedStatus === "completed") {
           setProgress({
             progress: data.progress ?? 100,
             translated: data.translated ?? 0,
             total: data.total ?? 0,
           })
           setStatus("completed")
-          if (data.message) setMessage(data.message)
+          setMessage(_resolveSSEMessage(data))
           stopPolling()
-        } else if (data.status === "error") {
-          setMessage(data.error_message || data.message || "Error")
+        } else if (normalizedStatus === "error") {
+          setMessage(_resolveSSEMessage(data) || data.error_message || "Error")
           setStatus("error")
           stopPolling()
-        } else if (data.status === "cancelled") {
+        } else if (normalizedStatus === "cancelled") {
           setStatus("cancelled")
+          setMessage(_resolveSSEMessage(data) || translations[getLocale()]?.cancelled || translations.ko.cancelled)
           stopPolling()
         } else {
           // idle — job might not be registered yet, wait a bit
@@ -232,7 +267,14 @@ export function useTranslationProgress(gameId: number | null) {
             stopPolling()
           }
         }
-      } catch { /* ignore network errors */ }
+      } catch {
+        failureCount++
+        if (failureCount >= 3) {
+          setMessage("Progress polling failed")
+          setStatus("error")
+          stopPolling()
+        }
+      }
     }
 
     // Poll immediately, then every 1.5s

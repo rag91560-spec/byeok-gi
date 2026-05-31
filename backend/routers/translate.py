@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 
@@ -23,6 +24,37 @@ router = APIRouter(prefix="/api/games/{game_id}/translate", tags=["translate"])
 
 
 OFFLINE_PROVIDERS = {"offline", "test"}
+CURRENT_TRANSLATION_SCHEMA = "chunk-index-v2"
+
+
+def _has_existing_backup(backup_mgr, filepath: str) -> bool:
+    """Return true when this original file already has a usable backup."""
+    target = os.path.normcase(os.path.abspath(filepath))
+    try:
+        for backup in backup_mgr.list_backups():
+            original_path = backup.get("original_path")
+            backup_path = backup.get("backup_path")
+            if not original_path or not backup_path:
+                continue
+            if os.path.normcase(os.path.abspath(original_path)) == target and os.path.exists(backup_path):
+                return True
+    except Exception:
+        logger.warning("Could not inspect existing backups for %s", filepath, exc_info=True)
+    return False
+
+
+def _create_backup_or_use_existing(backup_mgr, filepath: str) -> None:
+    """Create a fresh backup, or continue only if an existing backup is present."""
+    try:
+        backup_mgr.create_backup(filepath)
+    except PermissionError as exc:
+        if _has_existing_backup(backup_mgr, filepath):
+            logger.warning("Skipping fresh backup for %s because an existing backup is already present", filepath)
+            return
+        raise HTTPException(
+            500,
+            f"Cannot create backup for {os.path.basename(filepath)}. Check backup folder permissions.",
+        ) from exc
 
 
 @router.post("")
@@ -47,6 +79,7 @@ async def start_translation(game_id: int, body: TranslateRequest):
             source_lang=body.source_lang or game.get("source_lang", "auto"),
             target_lang=body.target_lang,
             preset_id=body.preset_id,
+            use_memory=body.use_memory,
             start_index=body.start_index,
             end_index=body.end_index,
         )
@@ -79,6 +112,9 @@ async def translation_poll(game_id: int):
             "translated": job.translated_strings,
             "total": job.total_strings,
             "message": getattr(job, '_last_message', ''),
+            "status_message": getattr(job, '_last_message', ''),
+            "message_key": getattr(job, '_last_message_key', ''),
+            "message_args": getattr(job, '_last_message_args', {}),
             "error_message": job.error_message or "",
         }
     # DB fallback — 메모리에 없으면 DB에서 최신 job 조회
@@ -86,15 +122,38 @@ async def translation_poll(game_id: int):
     if game and game.get("status") == "translating":
         db_job = await db.get_latest_job(game_id)
         if db_job:
+            status = db_job["status"]
+            progress = round(db_job.get("progress", 0) or 0, 1)
+            total = db_job.get("total_strings", 0) or 0
+            message_key = ""
+            if status == "running":
+                if total == 0 and progress <= 1:
+                    message_key = "extracting_strings"
+                elif progress <= 3:
+                    message_key = "checking_translation_memory"
+                elif progress <= 5:
+                    message_key = "starting_translation"
             return {
-                "status": db_job["status"],
-                "progress": round(db_job.get("progress", 0) or 0, 1),
+                "status": status,
+                "progress": progress,
                 "translated": db_job.get("translated_strings", 0) or 0,
-                "total": db_job.get("total_strings", 0) or 0,
+                "total": total,
                 "message": "",
+                "status_message": db_job.get("error_message", "") or "",
+                "message_key": message_key,
+                "message_args": {},
                 "error_message": db_job.get("error_message", "") or "",
             }
-    return {"status": "idle", "progress": 0, "translated": 0, "total": 0}
+    return {
+        "status": "idle",
+        "progress": 0,
+        "translated": 0,
+        "total": 0,
+        "message": "",
+        "status_message": "",
+        "message_key": "",
+        "message_args": {},
+    }
 
 
 @router.get("/status")
@@ -125,6 +184,10 @@ async def translation_status_sse(game_id: int):
                 "translated": job.translated_strings,
                 "total": job.total_strings,
                 "status": job.status,
+                "message": getattr(job, '_last_message', ''),
+                "status_message": getattr(job, '_last_message', ''),
+                "message_key": getattr(job, '_last_message_key', ''),
+                "message_args": getattr(job, '_last_message_args', {}),
             })
 
             heartbeat_count = 0
@@ -159,12 +222,36 @@ async def translation_status_sse(game_id: int):
 
 @router.post("/cancel")
 async def cancel_translation(game_id: int):
-    job = job_manager.get_game_job(game_id)
-    if not job:
-        raise HTTPException(404, "No active translation job")
+    completed_at = datetime.now(timezone.utc).isoformat()
+    job = job_manager.get_latest_game_job(game_id)
+    if job:
+        job_manager.cancel_job(job.job_id)
+        await db.update_job(
+            job.job_id,
+            status="cancelled",
+            error_message="",
+            completed_at=completed_at,
+        )
+        await db.update_game(game_id, status="idle")
+        return {"ok": True, "job_id": job.job_id, "status": "cancelled"}
 
-    job_manager.cancel_job(job.job_id)
-    return {"ok": True, "job_id": job.job_id}
+    db_job = await db.get_latest_job(game_id)
+    if db_job and db_job.get("status") in ("pending", "running"):
+        await db.update_job(
+            db_job["id"],
+            status="cancelled",
+            error_message="",
+            completed_at=completed_at,
+        )
+        await db.update_game(game_id, status="idle")
+        return {"ok": True, "job_id": db_job["id"], "status": "cancelled"}
+
+    game = await db.get_game(game_id)
+    if game and game.get("status") == "translating":
+        await db.update_game(game_id, status="idle")
+        return {"ok": True, "job_id": "", "status": "idle"}
+
+    return {"ok": True, "job_id": "", "status": "idle"}
 
 
 @router.post("/apply")
@@ -191,6 +278,20 @@ async def apply_translation(game_id: int):
         project_entries = json.loads(project_row["project_json"])
     except (json.JSONDecodeError, TypeError):
         raise HTTPException(400, "Invalid project data")
+
+    translated_entries = [
+        entry for entry in project_entries
+        if entry.get("translated") and entry.get("status") in ("translated", "reviewed")
+    ]
+    legacy_count = sum(
+        1 for entry in translated_entries
+        if entry.get("_translation_schema") != CURRENT_TRANSLATION_SCHEMA
+    )
+    if legacy_count:
+        raise HTTPException(
+            400,
+            "Saved translations were created by an older broken mapping pass. Run Re-translate before Apply.",
+        )
 
     # Rebuild project object
     from .. import engine_bridge
@@ -221,7 +322,7 @@ async def apply_translation(game_id: int):
     # Create backups for relevant files
     for res in resources:
         if res.get("path"):
-            backup_mgr.create_backup(res["path"])
+            _create_backup_or_use_existing(backup_mgr, res["path"])
 
     try:
         patch_path = engine_bridge.apply_translations_to_game(
@@ -275,9 +376,6 @@ async def rollback_translation(game_id: int):
 # ---------------------------------------------------------------------------
 
 from fastapi import Query
-from datetime import datetime, timezone
-
-
 @router.get("/strings")
 async def get_strings(
     game_id: int,
@@ -323,6 +421,17 @@ async def bulk_update_strings(game_id: int, body: BulkUpdateStringsRequest):
         raise HTTPException(400, "No updatable fields provided")
 
     updated = await db.bulk_update_project_entries(game_id, body.indices, fields)
+    return {"ok": True, "updated": updated}
+
+
+@router.post("/strings/reset")
+async def reset_strings(game_id: int):
+    """Clear all saved translations for a clean full retranslate."""
+    game = await db.get_game(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    updated = await db.reset_project_translations(game_id)
     return {"ok": True, "updated": updated}
 
 
