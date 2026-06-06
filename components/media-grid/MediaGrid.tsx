@@ -1,14 +1,18 @@
 "use client"
 
-import type { ReactNode } from "react"
+import type { MouseEventHandler, ReactNode } from "react"
 
 interface MediaGridProps {
   children: ReactNode
+  onMouseDown?: MouseEventHandler<HTMLDivElement>
 }
 
-export function MediaGrid({ children }: MediaGridProps) {
+export function MediaGrid({ children, onMouseDown }: MediaGridProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+    <div
+      className="explorer-tile-grid"
+      onMouseDown={onMouseDown}
+    >
       {children}
     </div>
   )

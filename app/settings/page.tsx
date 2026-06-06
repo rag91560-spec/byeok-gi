@@ -696,7 +696,7 @@ export default function SettingsPage() {
       <div className="h-16" />
 
       {/* Sticky Save Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/80 backdrop-blur-xl">
+      <div className="fixed bottom-0 left-14 right-0 z-50 border-t border-border bg-background/80 backdrop-blur-xl md:left-[200px]">
         <div className="max-w-3xl mx-auto px-6 md:px-8 py-3 flex items-center justify-between gap-3">
           {saveError && (
             <p className="text-xs text-red-400 truncate">{saveError}</p>

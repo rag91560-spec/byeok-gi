@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils"
-import { api } from "@/lib/api"
 import type { MangaItem, MediaCategory } from "@/lib/types"
-import { CheckIcon, FolderIcon } from "lucide-react"
+import { CheckIcon, Trash2Icon } from "lucide-react"
 import { useLocale } from "@/hooks/use-locale"
-import { useDragItem, useMergeTarget } from "@/hooks/use-media-dnd"
+import { useDragItem, useMergeTarget, type DragPayload } from "@/hooks/use-media-dnd"
+import { ExplorerTileIcon } from "@/components/media-grid/ExplorerTileIcon"
+import { api } from "@/lib/api"
 
 interface MangaCardProps {
   manga: MangaItem
@@ -16,19 +17,24 @@ interface MangaCardProps {
   selectable?: boolean
   selected?: boolean
   onSelect?: (checked: boolean) => void
+  onSelectionClick?: (event: React.MouseEvent) => boolean
+  getDragIds?: (primaryId: number) => number[]
+  sourceSurface?: string
   categories?: MediaCategory[]
   onMoveToCategory?: (categoryId: number | null) => void
-  onMergeDrop?: (draggedId: number) => void
+  onMergeDrop?: (payload: DragPayload) => void
 }
 
 export function MangaCard({
   manga,
   onClick,
   onDelete,
-  onChangeThumbnail,
   selectable,
   selected,
   onSelect,
+  onSelectionClick,
+  getDragIds,
+  sourceSurface,
   categories,
   onMoveToCategory,
   onMergeDrop,
@@ -39,14 +45,17 @@ export function MangaCard({
   const menuRef = useRef<HTMLDivElement>(null)
 
   // DnD: drag source
-  const drag = useDragItem("manga", manga.id)
+  const drag = useDragItem("manga", manga.id, { getIds: getDragIds, sourceSurface })
 
   // DnD: merge target
   const mergeHandler = useCallback(
-    (draggedId: number) => { if (draggedId !== manga.id) onMergeDrop?.(draggedId) },
+    (payload: DragPayload) => {
+      if (payload.ids.includes(manga.id)) return
+      onMergeDrop?.(payload)
+    },
     [manga.id, onMergeDrop],
   )
-  const merge = useMergeTarget(mergeHandler)
+  const merge = useMergeTarget(mergeHandler, 500, { acceptType: "manga" })
   const mergeProps = onMergeDrop
     ? { onDragOver: merge.onDragOver, onDragLeave: merge.onDragLeave, onDrop: merge.onDrop }
     : {}
@@ -55,7 +64,13 @@ export function MangaCard({
   const translatedPages = manga.translated_pages ?? 0
   const totalPages = manga.page_count
   const progressPct = totalPages > 0 ? Math.min((translatedPages / totalPages) * 100, 100) : 0
-  const isFullyTranslated = translatedPages >= totalPages && totalPages > 0
+  const roundedProgressPct = Math.round(progressPct)
+  const metaText = [
+    totalPages > 0 ? `${totalPages}p` : null,
+    translatedPages > 0 ? `${roundedProgressPct}%` : null,
+  ].filter(Boolean).join(" · ")
+  const thumbnailUrl = manga.thumbnail_path ? api.manga.thumbnailUrl(manga.id) : undefined
+  const hasThumbnail = Boolean(thumbnailUrl)
 
   // Close context menu on outside click
   useEffect(() => {
@@ -80,94 +95,112 @@ export function MangaCard({
   return (
     <>
       <div
+        data-testid={`media-card-manga-${manga.id}`}
         className={cn(
-          "group relative aspect-[3/4] rounded-xl overflow-hidden cursor-pointer",
-          "border transition-all duration-200",
+          "group relative cursor-pointer rounded-md transition-colors duration-150 ease-out",
           merge.showMerge
-            ? "border-accent ring-2 ring-accent/50 animate-pulse"
+            ? "animate-pulse"
             : selected
-              ? "border-accent shadow-md shadow-accent/20 ring-1 ring-accent/30"
-              : "border-transparent hover:border-accent hover:shadow-[0_0_12px_var(--accent-muted)] hover:scale-[1.03]",
+              ? ""
+              : "",
         )}
-        onClick={onClick}
+        onClick={(event) => {
+          if (onSelectionClick?.(event)) return
+          onClick()
+        }}
         onContextMenu={handleContextMenu}
         draggable={drag.draggable}
         onDragStart={drag.onDragStart}
         onDragEnd={drag.onDragEnd}
         {...mergeProps}
       >
-        {/* Cover image fills entire card */}
-        {manga.thumbnail_path ? (
-          <img
-            src={api.manga.thumbnailUrl(manga.id)}
-            alt={manga.title}
-            className="absolute inset-0 w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="absolute inset-0 w-full h-full bg-surface-elevated flex items-center justify-center text-text-tertiary">
-            <svg className="size-12 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-5-5L5 21" />
-            </svg>
-          </div>
-        )}
+        <div
+          className={cn(
+            "card-hover-frame flex aspect-[3/4] w-full flex-col rounded-md px-2.5 py-2.5",
+            hasThumbnail
+              ? "justify-end bg-cover bg-center text-left"
+              : "items-center text-center",
+          )}
+          style={hasThumbnail ? { backgroundImage: `url("${thumbnailUrl}")` } : undefined}
+          data-hover-active={merge.showMerge || selected ? "true" : undefined}
+        >
+          {hasThumbnail && (
+            <div className="tile-cover-shade pointer-events-none absolute inset-0 z-0" />
+          )}
 
-        {/* Bottom gradient overlay */}
-        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none" />
-
-        {/* Bottom text: title + page count */}
-        <div className="absolute inset-x-0 bottom-0 px-2.5 pb-3 pt-6 pointer-events-none">
-          <h3 className="text-[13px] font-semibold text-white truncate leading-tight" title={manga.title}>
-            {manga.title}
-          </h3>
-          <p className="text-[10px] text-white/70 mt-0.5">
-            {manga.page_count}p
-          </p>
-        </div>
-
-        {/* Translation progress bar */}
-        {translatedPages > 0 && (
-          <div className="absolute inset-x-0 bottom-0 h-[3px]">
-            <div
+          {/* Selection checkbox */}
+          {selectable && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onSelect?.(!selected) }}
               className={cn(
-                "h-full transition-all",
-                isFullyTranslated ? "bg-success" : "bg-accent"
+                "absolute left-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded border-2 transition-all",
+                selected
+                  ? "bg-accent border-accent text-white"
+                  : "border-text-tertiary/70 bg-background/80 opacity-0 hover:border-text-secondary group-hover:opacity-100"
               )}
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        )}
+              aria-label={selected ? t("deselectAll") : t("selectItem")}
+            >
+              {selected && <CheckIcon className="size-3.5" strokeWidth={3} />}
+            </button>
+          )}
 
-        {/* Selection checkbox */}
-        {selectable && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onSelect?.(!selected) }}
-            className={cn(
-              "absolute top-2 left-2 size-5 rounded border-2 flex items-center justify-center transition-all z-10",
-              selected
-                ? "bg-accent border-accent text-white"
-                : "border-white/60 bg-black/30 opacity-0 group-hover:opacity-100 hover:border-white"
+          {!selected && onDelete && (
+            <div className="absolute right-1.5 top-1.5 z-20 flex flex-col gap-1.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(manga.id)
+                }}
+                className="rounded-full bg-black/70 p-1.5 text-white opacity-0 shadow-sm transition-all hover:bg-error/85 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 group-hover:opacity-100"
+                title={t("removeFromLibrary")}
+                aria-label={t("removeFromLibrary")}
+              >
+                <Trash2Icon className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {selected && (
+            <div className="absolute inset-0 z-[5] bg-accent/10 pointer-events-none" />
+          )}
+
+          {merge.showMerge && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-accent/20 pointer-events-none">
+              <span className="bg-accent text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+                {t("createGroup")}
+              </span>
+            </div>
+          )}
+
+          {!hasThumbnail && (
+            <div className="flex min-h-0 flex-1 w-full items-center justify-center">
+              <ExplorerTileIcon kind="manga" />
+            </div>
+          )}
+
+          <div className="relative z-10 w-full min-w-0">
+            <h3
+              className={cn(
+                "truncate text-[13px] font-medium leading-5",
+                hasThumbnail ? "tile-cover-text" : "text-text-primary",
+              )}
+              title={manga.title}
+            >
+              {manga.title}
+            </h3>
+            {metaText && (
+              <p
+                className={cn(
+                  "mt-0.5 h-4 truncate text-[11px] leading-4",
+                  hasThumbnail ? "tile-cover-text tile-cover-meta" : "text-text-tertiary",
+                )}
+                title={metaText}
+              >
+                {metaText}
+              </p>
             )}
-          >
-            {selected && <CheckIcon className="size-3.5" strokeWidth={3} />}
-          </button>
-        )}
-
-        {/* Selected overlay */}
-        {selected && (
-          <div className="absolute inset-0 bg-accent/10 pointer-events-none" />
-        )}
-
-        {/* Merge overlay */}
-        {merge.showMerge && (
-          <div className="absolute inset-0 bg-accent/20 flex items-center justify-center pointer-events-none z-20">
-            <span className="bg-accent text-white text-xs font-bold px-3 py-1.5 rounded-lg">
-              {t("createGroup")}
-            </span>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Context menu for moving to category */}

@@ -15,7 +15,7 @@ class GlossaryPayload(RootModel[Dict[str, str]]):
 
 class CategoryCreate(BaseModel):
     name: str
-    media_type: str  # 'video' | 'audio' | 'manga'
+    media_type: str  # 'video' | 'audio' | 'manga' | 'novels'
     sort_order: int = 0
     parent_id: Optional[int] = None
 
@@ -38,8 +38,8 @@ async def list_categories(media_type: str = ""):
 
 @router.post("")
 async def create_category(body: CategoryCreate):
-    if body.media_type not in ("video", "audio", "manga"):
-        raise HTTPException(400, "media_type must be 'video', 'audio', or 'manga'")
+    if body.media_type not in ("video", "audio", "manga", "novels"):
+        raise HTTPException(400, "media_type must be 'video', 'audio', 'manga', or 'novels'")
     if body.parent_id is not None:
         parent = await db.get_category(body.parent_id)
         if not parent:
@@ -81,7 +81,7 @@ async def delete_category(cat_id: int):
     existing = await db.get_category(cat_id)
     if not existing:
         raise HTTPException(404, "Category not found")
-    # delete_category itself cascades descendants and clears items
+    # Removing a category preserves direct items and child folders by moving them up one level.
     await db.delete_category(cat_id)
     return {"ok": True}
 

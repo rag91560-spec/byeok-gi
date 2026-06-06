@@ -21,7 +21,7 @@ _GAME_COLUMNS = frozenset({
     "source_lang", "status", "last_played_at", "play_time_minutes", "updated_at",
     "vndb_id", "dlsite_id", "cover_source", "preset_id", "developer",
     "platform", "package_name", "original_path", "variant_lang",
-    "qa_error_count", "qa_warning_count", "aes_key", "folder_id",
+    "qa_error_count", "qa_warning_count", "aes_key", "folder_id", "removed_at",
 })
 
 _JOB_COLUMNS = frozenset({
@@ -94,6 +94,13 @@ class _PooledConnection:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self._conn:
+            if exc_type is not None:
+                try:
+                    await self._conn.rollback()
+                except Exception:
+                    await self._conn.close()
+                    self._conn = None
+                    return
             if self._is_temp:
                 await self._conn.close()
             else:
@@ -126,7 +133,8 @@ CREATE TABLE IF NOT EXISTS games (
     last_played_at TEXT,
     play_time_minutes INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS translation_projects (
@@ -202,7 +210,8 @@ ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'windows';
 ALTER TABLE games ADD COLUMN package_name TEXT DEFAULT '';
 ALTER TABLE games ADD COLUMN original_path TEXT DEFAULT '';
 ALTER TABLE games ADD COLUMN variant_lang TEXT DEFAULT '';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tm_unique ON translation_memory(source_hash, source_lang, target_lang);
+DROP INDEX IF EXISTS idx_tm_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tm_unique ON translation_memory(source_hash, source_lang, target_lang, context_tag, game_id);
 ALTER TABLE games ADD COLUMN qa_error_count INTEGER DEFAULT 0;
 ALTER TABLE games ADD COLUMN qa_warning_count INTEGER DEFAULT 0;
 CREATE TABLE IF NOT EXISTS qa_results (
@@ -235,7 +244,8 @@ CREATE TABLE IF NOT EXISTS videos (
     size INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
 );
 CREATE TABLE IF NOT EXISTS manga (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,7 +257,33 @@ CREATE TABLE IF NOT EXISTS manga (
     page_count INTEGER DEFAULT 0,
     thumbnail_path TEXT DEFAULT '',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
+);
+CREATE TABLE IF NOT EXISTS novels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    file_name TEXT DEFAULT '',
+    extension TEXT DEFAULT '',
+    source_path TEXT DEFAULT '',
+    source_path_allowed INTEGER DEFAULT 0,
+    content TEXT DEFAULT '',
+    preview TEXT DEFAULT '',
+    content_hash TEXT DEFAULT '',
+    size INTEGER DEFAULT 0,
+    category_id INTEGER DEFAULT NULL,
+    metadata_only INTEGER DEFAULT 0,
+    translation_status TEXT DEFAULT 'original',
+    translated_text_path TEXT DEFAULT '',
+    translation_project_id INTEGER DEFAULT NULL,
+    read_progress REAL DEFAULT 0,
+    last_opened_at TEXT DEFAULT NULL,
+    reader_settings_json TEXT DEFAULT '{}',
+    content_style_json TEXT DEFAULT '{"ranges":[]}',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
 );
 CREATE TABLE IF NOT EXISTS manga_translations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,7 +316,8 @@ CREATE TABLE IF NOT EXISTS audio_items (
     category_id INTEGER DEFAULT NULL,
     sort_order INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
 );
 CREATE TABLE IF NOT EXISTS media_categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -376,7 +413,53 @@ CREATE TABLE IF NOT EXISTS subtitle_glossary (
 CREATE INDEX IF NOT EXISTS idx_subtitle_glossary_sub ON subtitle_glossary(subtitle_id);
 ALTER TABLE media_categories ADD COLUMN glossary_json TEXT DEFAULT '{}';
 ALTER TABLE media_categories ADD COLUMN parent_id INTEGER DEFAULT NULL;
+ALTER TABLE games ADD COLUMN removed_at TEXT DEFAULT NULL;
+ALTER TABLE videos ADD COLUMN removed_at TEXT DEFAULT NULL;
+ALTER TABLE manga ADD COLUMN removed_at TEXT DEFAULT NULL;
+ALTER TABLE audio_items ADD COLUMN removed_at TEXT DEFAULT NULL;
+CREATE TABLE IF NOT EXISTS novels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    file_name TEXT DEFAULT '',
+    extension TEXT DEFAULT '',
+    source_path TEXT DEFAULT '',
+    source_path_allowed INTEGER DEFAULT 0,
+    content TEXT DEFAULT '',
+    preview TEXT DEFAULT '',
+    content_hash TEXT DEFAULT '',
+    size INTEGER DEFAULT 0,
+    category_id INTEGER DEFAULT NULL,
+    metadata_only INTEGER DEFAULT 0,
+    translation_status TEXT DEFAULT 'original',
+    translated_text_path TEXT DEFAULT '',
+    translation_project_id INTEGER DEFAULT NULL,
+    read_progress REAL DEFAULT 0,
+    last_opened_at TEXT DEFAULT NULL,
+    reader_settings_json TEXT DEFAULT '{}',
+    content_style_json TEXT DEFAULT '{"ranges":[]}',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    removed_at TEXT DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_novels_removed_at ON novels(removed_at);
+CREATE INDEX IF NOT EXISTS idx_novels_category ON novels(category_id);
+CREATE INDEX IF NOT EXISTS idx_novels_source_path ON novels(source_path);
+CREATE INDEX IF NOT EXISTS idx_novels_content_hash ON novels(content_hash);
+CREATE TABLE IF NOT EXISTS import_grant_uses (
+    nonce TEXT PRIMARY KEY,
+    grant_hash TEXT NOT NULL,
+    action TEXT NOT NULL,
+    path_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_import_grant_uses_expires ON import_grant_uses(expires_at);
 CREATE INDEX IF NOT EXISTS idx_media_categories_parent ON media_categories(media_type, parent_id);
+CREATE INDEX IF NOT EXISTS idx_games_removed_at ON games(removed_at);
+CREATE INDEX IF NOT EXISTS idx_videos_removed_at ON videos(removed_at);
+CREATE INDEX IF NOT EXISTS idx_manga_removed_at ON manga(removed_at);
+CREATE INDEX IF NOT EXISTS idx_audio_items_removed_at ON audio_items(removed_at);
 """
 
 
@@ -393,8 +476,67 @@ async def init_db():
             if stmt and not stmt.startswith("--"):
                 try:
                     await db.execute(stmt)
-                except Exception:
-                    pass  # column/index already exists
+                except Exception as e:
+                    # ALTER TABLE ADD COLUMN 이 두 번째 실행 시 "duplicate column"
+                    # 으로 실패하는 건 정상. 그 외 에러는 로깅 후 raise (조용히
+                    # 묻으면 vndb_id 같은 컬럼 누락 → 런타임 OperationalError).
+                    msg = str(e).lower()
+                    if "duplicate column" in msg or "already exists" in msg:
+                        continue
+                    print(f"[db.init_db] migration failed: {stmt[:80]}... -> {e}")
+                    raise
+        await db.commit()
+
+        # 방어적 검증: ALTER 이후에도 핵심 컬럼이 누락된 케이스(이전 빌드의
+        # silent except 로 인해 마이그레이션이 한 번도 적용 안 된 DB) 복구.
+        cur = await db.execute("PRAGMA table_info(games)")
+        existing_cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        recovery_alters = [
+            ("vndb_id",        "ALTER TABLE games ADD COLUMN vndb_id TEXT DEFAULT ''"),
+            ("dlsite_id",      "ALTER TABLE games ADD COLUMN dlsite_id TEXT DEFAULT ''"),
+            ("cover_source",   "ALTER TABLE games ADD COLUMN cover_source TEXT DEFAULT ''"),
+            ("preset_id",      "ALTER TABLE games ADD COLUMN preset_id INTEGER DEFAULT NULL"),
+            ("developer",      "ALTER TABLE games ADD COLUMN developer TEXT DEFAULT ''"),
+            ("platform",       "ALTER TABLE games ADD COLUMN platform TEXT DEFAULT 'windows'"),
+            ("package_name",   "ALTER TABLE games ADD COLUMN package_name TEXT DEFAULT ''"),
+            ("original_path",  "ALTER TABLE games ADD COLUMN original_path TEXT DEFAULT ''"),
+            ("variant_lang",   "ALTER TABLE games ADD COLUMN variant_lang TEXT DEFAULT ''"),
+            ("qa_error_count", "ALTER TABLE games ADD COLUMN qa_error_count INTEGER DEFAULT 0"),
+            ("qa_warning_count","ALTER TABLE games ADD COLUMN qa_warning_count INTEGER DEFAULT 0"),
+            ("removed_at",     "ALTER TABLE games ADD COLUMN removed_at TEXT DEFAULT NULL"),
+        ]
+        for col, sql in recovery_alters:
+            if col not in existing_cols:
+                print(f"[db.init_db] recovering missing column: games.{col}")
+                await db.execute(sql)
+        for table in ("videos", "manga", "audio_items", "novels"):
+            cur = await db.execute(f"PRAGMA table_info({table})")
+            table_cols = {row[1] for row in await cur.fetchall()}
+            await cur.close()
+            if "removed_at" not in table_cols:
+                print(f"[db.init_db] recovering missing column: {table}.removed_at")
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN removed_at TEXT DEFAULT NULL")
+        cur = await db.execute("PRAGMA table_info(novels)")
+        novel_cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        novel_recovery_alters = [
+            ("category_id", "ALTER TABLE novels ADD COLUMN category_id INTEGER DEFAULT NULL"),
+            ("metadata_only", "ALTER TABLE novels ADD COLUMN metadata_only INTEGER DEFAULT 0"),
+            ("translation_status", "ALTER TABLE novels ADD COLUMN translation_status TEXT DEFAULT 'original'"),
+            ("translated_text_path", "ALTER TABLE novels ADD COLUMN translated_text_path TEXT DEFAULT ''"),
+            ("translation_project_id", "ALTER TABLE novels ADD COLUMN translation_project_id INTEGER DEFAULT NULL"),
+            ("read_progress", "ALTER TABLE novels ADD COLUMN read_progress REAL DEFAULT 0"),
+            ("last_opened_at", "ALTER TABLE novels ADD COLUMN last_opened_at TEXT DEFAULT NULL"),
+            ("reader_settings_json", "ALTER TABLE novels ADD COLUMN reader_settings_json TEXT DEFAULT '{}'"),
+            ("content_style_json", "ALTER TABLE novels ADD COLUMN content_style_json TEXT DEFAULT '{\"ranges\":[]}'"),
+            ("source_path_allowed", "ALTER TABLE novels ADD COLUMN source_path_allowed INTEGER DEFAULT 0"),
+            ("sort_order", "ALTER TABLE novels ADD COLUMN sort_order INTEGER DEFAULT 0"),
+        ]
+        for col, sql in novel_recovery_alters:
+            if col not in novel_cols:
+                print(f"[db.init_db] recovering missing column: novels.{col}")
+                await db.execute(sql)
         await db.commit()
     finally:
         await db.close()
@@ -410,12 +552,12 @@ async def list_games(search: str = "") -> list[dict]:
     async with get_db() as db:
         if search:
             rows = await db.execute_fetchall(
-                "SELECT * FROM games WHERE title LIKE ? ORDER BY updated_at DESC",
+                "SELECT * FROM games WHERE removed_at IS NULL AND title LIKE ? ORDER BY updated_at DESC",
                 (f"%{search}%",),
             )
         else:
             rows = await db.execute_fetchall(
-                "SELECT * FROM games ORDER BY updated_at DESC"
+                "SELECT * FROM games WHERE removed_at IS NULL ORDER BY updated_at DESC"
             )
         return [dict(r) for r in rows]
 
@@ -465,6 +607,78 @@ async def delete_game(game_id: int) -> bool:
         cursor = await db.execute("DELETE FROM games WHERE id = ?", (game_id,))
         await db.commit()
         return cursor.rowcount > 0
+
+
+_TRASH_TABLES = {
+    "game": "games",
+    "games": "games",
+    "video": "videos",
+    "videos": "videos",
+    "manga": "manga",
+    "audio": "audio_items",
+    "audio_items": "audio_items",
+    "novel": "novels",
+    "novels": "novels",
+}
+
+
+def _trash_table(media_type: str) -> str:
+    table = _TRASH_TABLES.get(media_type)
+    if not table:
+        raise ValueError(f"Unsupported trash media type: {media_type}")
+    return table
+
+
+def _clean_ids(ids: list[int]) -> list[int]:
+    seen: set[int] = set()
+    clean: list[int] = []
+    for raw in ids:
+        value = int(raw)
+        if value > 0 and value not in seen:
+            seen.add(value)
+            clean.append(value)
+    return clean
+
+
+async def list_trash_items(media_type: str) -> list[dict]:
+    table = _trash_table(media_type)
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            f"SELECT * FROM {table} WHERE removed_at IS NOT NULL ORDER BY removed_at DESC, updated_at DESC"
+        )
+        return [dict(r) for r in rows]
+
+
+async def remove_from_library(media_type: str, ids: list[int]) -> int:
+    table = _trash_table(media_type)
+    clean = _clean_ids(ids)
+    if not clean:
+        return 0
+    now = _now()
+    placeholders = ",".join("?" * len(clean))
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"UPDATE {table} SET removed_at = ?, updated_at = ? WHERE id IN ({placeholders}) AND removed_at IS NULL",
+            [now, now] + clean,
+        )
+        await db.commit()
+        return cursor.rowcount
+
+
+async def restore_from_trash(media_type: str, ids: list[int]) -> int:
+    table = _trash_table(media_type)
+    clean = _clean_ids(ids)
+    if not clean:
+        return 0
+    now = _now()
+    placeholders = ",".join("?" * len(clean))
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"UPDATE {table} SET removed_at = NULL, updated_at = ? WHERE id IN ({placeholders}) AND removed_at IS NOT NULL",
+            [now] + clean,
+        )
+        await db.commit()
+        return cursor.rowcount
 
 
 # --- Translation Projects ---
@@ -683,18 +897,30 @@ async def tm_lookup(source_text: str, source_lang: str = "ja", target_lang: str 
 
 
 async def tm_lookup_batch(texts: list[str], source_lang: str = "ja",
-                          target_lang: str = "ko") -> dict[str, dict]:
+                          target_lang: str = "ko",
+                          context_tag: str = "",
+                          game_id: int = None) -> dict[str, dict]:
     """Batch lookup. Returns {source_text: {translated_text, ...}}."""
     if not texts:
         return {}
     hashes = {_hash_text(t): t for t in texts}
     placeholders = ",".join("?" * len(hashes))
     async with get_db() as db:
+        params = list(hashes.keys()) + [source_lang, target_lang]
+        where = [
+            f"source_hash IN ({placeholders})",
+            "source_lang = ?",
+            "target_lang = ?",
+        ]
+        if context_tag:
+            where.append("context_tag = ?")
+            params.append(context_tag)
+        if game_id is not None:
+            where.append("game_id = ?")
+            params.append(game_id)
         rows = await db.execute_fetchall(
-            f"""SELECT * FROM translation_memory
-                WHERE source_hash IN ({placeholders})
-                AND source_lang = ? AND target_lang = ?""",
-            list(hashes.keys()) + [source_lang, target_lang],
+            f"SELECT * FROM translation_memory WHERE {' AND '.join(where)}",
+            params,
         )
         result = {}
         ids = []
@@ -721,8 +947,10 @@ async def tm_insert(source_text: str, translated_text: str,
     async with get_db() as db:
         # Upsert: update if exists
         existing = await db.execute_fetchall(
-            "SELECT id FROM translation_memory WHERE source_hash = ? AND source_lang = ? AND target_lang = ?",
-            (h, source_lang, target_lang),
+            """SELECT id FROM translation_memory
+               WHERE source_hash = ? AND source_lang = ? AND target_lang = ?
+               AND context_tag = ? AND game_id IS ?""",
+            (h, source_lang, target_lang, context_tag, game_id),
         )
         if existing:
             await db.execute(
@@ -742,8 +970,10 @@ async def tm_insert(source_text: str, translated_text: str,
             )
         await db.commit()
         rows = await db.execute_fetchall(
-            "SELECT * FROM translation_memory WHERE source_hash = ? AND source_lang = ? AND target_lang = ?",
-            (h, source_lang, target_lang),
+            """SELECT * FROM translation_memory
+               WHERE source_hash = ? AND source_lang = ? AND target_lang = ?
+               AND context_tag = ? AND game_id IS ?""",
+            (h, source_lang, target_lang, context_tag, game_id),
         )
         return dict(rows[0])
 
@@ -1054,6 +1284,39 @@ async def bulk_update_project_entries(
     return updated
 
 
+async def reset_project_translations(game_id: int) -> int:
+    """Clear saved translations so a full retranslate cannot reuse shifted text."""
+    project_row = await get_project(game_id)
+    if not project_row:
+        return 0
+
+    try:
+        all_entries: list[dict] = json.loads(project_row["project_json"])
+    except (json.JSONDecodeError, TypeError):
+        return 0
+
+    reset_count = 0
+    for entry in all_entries:
+        if entry.get("translated") or entry.get("status") in ("translated", "reviewed"):
+            entry["translated"] = ""
+            entry["status"] = "pending"
+            entry["review_status"] = ""
+            entry.pop("_translation_schema", None)
+            reset_count += 1
+
+    if reset_count == 0:
+        return 0
+
+    await save_project(
+        game_id,
+        json.dumps(all_entries, ensure_ascii=False),
+        provider=project_row.get("provider", ""),
+        model=project_row.get("model", ""),
+    )
+    await update_game(game_id, status="idle", translated_count=0)
+    return reset_count
+
+
 # --- Media Folders ---
 
 async def media_list_folders(game_id: int) -> list[dict]:
@@ -1105,12 +1368,12 @@ async def media_delete_folder(folder_id: int, game_id: int) -> bool:
 
 _VIDEO_COLUMNS = frozenset({
     "title", "type", "source", "thumbnail", "duration", "size", "sort_order",
-    "category_id", "updated_at",
+    "category_id", "updated_at", "removed_at",
 })
 
 _AUDIO_COLUMNS = frozenset({
     "title", "type", "source", "thumbnail", "duration", "size", "sort_order",
-    "category_id", "updated_at", "script_text", "translated_script",
+    "category_id", "updated_at", "script_text", "translated_script", "removed_at",
 })
 
 _SUBTITLE_COLUMNS = frozenset({
@@ -1136,7 +1399,7 @@ _CATEGORY_COLUMNS = frozenset({
 async def list_videos() -> list[dict]:
     async with get_db() as db:
         rows = await db.execute_fetchall(
-            "SELECT * FROM videos ORDER BY sort_order ASC, created_at DESC"
+            "SELECT * FROM videos WHERE removed_at IS NULL ORDER BY sort_order ASC, created_at DESC"
         )
         return [dict(r) for r in rows]
 
@@ -1190,8 +1453,46 @@ async def delete_video(video_id: int) -> bool:
 # --- Manga ---
 
 _MANGA_COLUMNS = frozenset({
-    "title", "artist", "tags", "page_count", "thumbnail_path", "category_id", "updated_at",
+    "title", "artist", "tags", "page_count", "thumbnail_path", "category_id", "updated_at", "removed_at",
 })
+
+_NOVEL_COLUMNS = frozenset({
+    "title", "file_name", "extension", "source_path", "source_path_allowed", "content", "preview", "content_hash",
+    "size", "category_id", "metadata_only", "translation_status", "translated_text_path",
+    "translation_project_id", "read_progress", "last_opened_at", "reader_settings_json",
+    "content_style_json",
+    "sort_order", "updated_at", "removed_at",
+})
+
+
+def novel_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest() if content else ""
+
+
+def _normalize_novel(row: dict) -> dict:
+    row["metadata_only"] = bool(row.get("metadata_only"))
+    row["source_path_allowed"] = bool(row.get("source_path_allowed"))
+    row["read_progress"] = float(row.get("read_progress") or 0)
+    return row
+
+
+async def mark_import_grant_used(nonce: str, grant_hash: str, action: str, path_hash: str, expires_at: int) -> bool:
+    if not nonce or not grant_hash:
+        return False
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+    async with get_db() as db:
+        await db.execute("DELETE FROM import_grant_uses WHERE expires_at < ?", (now_epoch,))
+        try:
+            await db.execute(
+                """INSERT INTO import_grant_uses (nonce, grant_hash, action, path_hash, expires_at, used_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (nonce, grant_hash, action, path_hash, int(expires_at), _now()),
+            )
+        except aiosqlite.IntegrityError:
+            await db.rollback()
+            return False
+        await db.commit()
+        return True
 
 
 async def list_manga(search: str = "", source_type: str = "") -> list[dict]:
@@ -1204,7 +1505,7 @@ async def list_manga(search: str = "", source_type: str = "") -> list[dict]:
                    FROM manga_translations
                    GROUP BY manga_id
                ) tp ON tp.manga_id = m.id
-               WHERE 1=1"""
+               WHERE m.removed_at IS NULL"""
         params: list = []
         if search:
             q += " AND (m.title LIKE ? OR m.artist LIKE ? OR m.tags LIKE ?)"
@@ -1262,6 +1563,185 @@ async def delete_manga(manga_id: int) -> bool:
         cursor = await db.execute("DELETE FROM manga WHERE id = ?", (manga_id,))
         await db.commit()
         return cursor.rowcount > 0
+
+
+# --- Novels ---
+
+_NOVEL_LIST_COLUMNS = """id, title, file_name, extension, '' AS source_path, source_path_allowed, preview, content_hash,
+                         size, category_id, metadata_only, translation_status, translated_text_path,
+                         translation_project_id, read_progress, last_opened_at, '{}' AS reader_settings_json,
+                         '{"ranges":[]}' AS content_style_json,
+                         sort_order, created_at, updated_at, removed_at"""
+
+
+async def list_novels(search: str = "") -> list[dict]:
+    async with get_db() as db:
+        q = f"SELECT {_NOVEL_LIST_COLUMNS} FROM novels WHERE removed_at IS NULL"
+        params: list = []
+        if search:
+            q += " AND (title LIKE ? OR file_name LIKE ? OR source_path LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        q += " ORDER BY last_opened_at IS NULL, last_opened_at DESC, sort_order ASC, created_at DESC"
+        rows = await db.execute_fetchall(q, params)
+        return [_normalize_novel(dict(r)) for r in rows]
+
+
+async def list_novel_trash() -> list[dict]:
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            f"""SELECT {_NOVEL_LIST_COLUMNS}
+                FROM novels
+                WHERE removed_at IS NOT NULL
+                ORDER BY removed_at DESC, updated_at DESC"""
+        )
+        return [_normalize_novel(dict(r)) for r in rows]
+
+
+async def get_novel(novel_id: int) -> Optional[dict]:
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM novels WHERE id = ?", (novel_id,)
+        )
+        return _normalize_novel(dict(rows[0])) if rows else None
+
+
+async def get_active_novel(novel_id: int) -> Optional[dict]:
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM novels WHERE id = ? AND removed_at IS NULL", (novel_id,)
+        )
+        return _normalize_novel(dict(rows[0])) if rows else None
+
+
+async def find_active_novel_duplicate(source_path: str = "", content_hash: str = "", size: int = 0) -> Optional[dict]:
+    async with get_db() as db:
+        if source_path:
+            rows = await db.execute_fetchall(
+                f"SELECT {_NOVEL_LIST_COLUMNS} FROM novels WHERE source_path = ? AND removed_at IS NULL LIMIT 1",
+                (source_path,),
+            )
+            if rows:
+                return _normalize_novel(dict(rows[0]))
+        if content_hash:
+            rows = await db.execute_fetchall(
+                f"""SELECT {_NOVEL_LIST_COLUMNS}
+                    FROM novels
+                    WHERE content_hash = ? AND size = ? AND removed_at IS NULL
+                    LIMIT 1""",
+                (content_hash, size),
+            )
+            if rows:
+                return _normalize_novel(dict(rows[0]))
+    return None
+
+
+async def find_removed_novel_duplicate(source_path: str = "", content_hash: str = "", size: int = 0) -> Optional[dict]:
+    async with get_db() as db:
+        if source_path:
+            rows = await db.execute_fetchall(
+                f"SELECT {_NOVEL_LIST_COLUMNS} FROM novels WHERE source_path = ? AND removed_at IS NOT NULL LIMIT 1",
+                (source_path,),
+            )
+            if rows:
+                return _normalize_novel(dict(rows[0]))
+        if content_hash:
+            rows = await db.execute_fetchall(
+                f"""SELECT {_NOVEL_LIST_COLUMNS}
+                    FROM novels
+                    WHERE content_hash = ? AND size = ? AND removed_at IS NOT NULL
+                    LIMIT 1""",
+                (content_hash, size),
+            )
+            if rows:
+                return _normalize_novel(dict(rows[0]))
+    return None
+
+
+async def restore_novel_to_library(novel_id: int, category_id: int | None = None) -> Optional[dict]:
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE novels SET removed_at = NULL, category_id = ?, updated_at = ? WHERE id = ?",
+            (category_id, _now(), novel_id),
+        )
+        await db.commit()
+    return await get_active_novel(novel_id)
+
+
+async def create_novel(title: str, **fields) -> dict:
+    now = _now()
+    content = fields.get("content", "") or ""
+    content_hash = fields.get("content_hash") or novel_content_hash(content)
+    async with get_db() as db:
+        cursor = await db.execute(
+            """INSERT INTO novels (
+                   title, file_name, extension, source_path, source_path_allowed, content, preview, content_hash,
+                   size, category_id, metadata_only, translation_status, translated_text_path,
+                   translation_project_id, read_progress, last_opened_at, reader_settings_json, content_style_json,
+                   sort_order, created_at, updated_at
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                title,
+                fields.get("file_name", ""),
+                fields.get("extension", ""),
+                fields.get("source_path", ""),
+                1 if fields.get("source_path_allowed") else 0,
+                content,
+                fields.get("preview", ""),
+                content_hash,
+                fields.get("size", 0),
+                fields.get("category_id"),
+                1 if fields.get("metadata_only") else 0,
+                fields.get("translation_status", "original"),
+                fields.get("translated_text_path", ""),
+                fields.get("translation_project_id"),
+                fields.get("read_progress", 0),
+                fields.get("last_opened_at"),
+                fields.get("reader_settings_json", "{}"),
+                fields.get("content_style_json", '{"ranges":[]}'),
+                fields.get("sort_order", 0),
+                now,
+                now,
+            ),
+        )
+        await db.commit()
+        novel_id = cursor.lastrowid
+    return await get_active_novel(novel_id)
+
+
+async def update_novel(novel_id: int, **fields) -> Optional[dict]:
+    if not fields:
+        return await get_active_novel(novel_id)
+    fields = _validate_columns(fields, _NOVEL_COLUMNS, "novels")
+    if not fields:
+        return await get_active_novel(novel_id)
+    if "content" in fields and "content_hash" not in fields:
+        fields["content_hash"] = novel_content_hash(fields.get("content") or "")
+    if "metadata_only" in fields:
+        fields["metadata_only"] = 1 if fields["metadata_only"] else 0
+    if "source_path_allowed" in fields:
+        fields["source_path_allowed"] = 1 if fields["source_path_allowed"] else 0
+    fields["updated_at"] = _now()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [novel_id]
+    async with get_db() as db:
+        await db.execute(f"UPDATE novels SET {set_clause} WHERE id = ? AND removed_at IS NULL", values)
+        await db.commit()
+    return await get_active_novel(novel_id)
+
+
+async def bulk_move_novels(novel_ids: list[int], category_id: int | None):
+    clean = _clean_ids(novel_ids)
+    if not clean:
+        return 0
+    async with get_db() as db:
+        placeholders = ",".join("?" * len(clean))
+        cursor = await db.execute(
+            f"UPDATE novels SET category_id = ?, updated_at = ? WHERE id IN ({placeholders}) AND removed_at IS NULL",
+            [category_id, _now()] + clean,
+        )
+        await db.commit()
+        return cursor.rowcount
 
 
 async def get_manga_translation(manga_id: int, page: int) -> Optional[dict]:
@@ -1350,7 +1830,7 @@ async def list_manga_renders(manga_id: int) -> list[dict]:
 async def list_audio_items() -> list[dict]:
     async with get_db() as db:
         rows = await db.execute_fetchall(
-            "SELECT * FROM audio_items ORDER BY sort_order ASC, created_at DESC"
+            "SELECT * FROM audio_items WHERE removed_at IS NULL ORDER BY sort_order ASC, created_at DESC"
         )
         return [dict(r) for r in rows]
 
@@ -1537,28 +2017,37 @@ async def update_category(cat_id: int, **fields) -> Optional[dict]:
 
 
 async def delete_category(cat_id: int) -> bool:
-    """Delete a category and all descendants. Items in any of them become uncategorized."""
-    descendant_ids = await list_category_descendants(cat_id)
-    if not descendant_ids:
-        return False
     async with get_db() as db:
-        placeholders = ",".join("?" * len(descendant_ids))
-        # Clear items in all affected categories
+        rows = await db.execute_fetchall(
+            "SELECT parent_id FROM media_categories WHERE id = ?", (cat_id,)
+        )
+        if not rows:
+            return False
+        parent_id = rows[0]["parent_id"]
+        # Removing a folder ungroups its direct contents instead of deleting library records.
         await db.execute(
-            f"UPDATE videos SET category_id = NULL WHERE category_id IN ({placeholders})",
-            descendant_ids,
+            "UPDATE videos SET category_id = ? WHERE category_id = ?",
+            (parent_id, cat_id),
         )
         await db.execute(
-            f"UPDATE audio_items SET category_id = NULL WHERE category_id IN ({placeholders})",
-            descendant_ids,
+            "UPDATE audio_items SET category_id = ? WHERE category_id = ?",
+            (parent_id, cat_id),
         )
         await db.execute(
-            f"UPDATE manga SET category_id = NULL WHERE category_id IN ({placeholders})",
-            descendant_ids,
+            "UPDATE manga SET category_id = ? WHERE category_id = ?",
+            (parent_id, cat_id),
+        )
+        await db.execute(
+            "UPDATE novels SET category_id = ? WHERE category_id = ?",
+            (parent_id, cat_id),
+        )
+        await db.execute(
+            "UPDATE media_categories SET parent_id = ? WHERE parent_id = ?",
+            (parent_id, cat_id),
         )
         cursor = await db.execute(
-            f"DELETE FROM media_categories WHERE id IN ({placeholders})",
-            descendant_ids,
+            "DELETE FROM media_categories WHERE id = ?",
+            (cat_id,),
         )
         await db.commit()
         return cursor.rowcount > 0
@@ -1585,11 +2074,11 @@ async def list_audio_items_by_category(category_id: Optional[int]) -> list[dict]
     async with get_db() as db:
         if category_id is None:
             rows = await db.execute_fetchall(
-                "SELECT * FROM audio_items WHERE category_id IS NULL ORDER BY sort_order ASC, created_at DESC"
+                "SELECT * FROM audio_items WHERE category_id IS NULL AND removed_at IS NULL ORDER BY sort_order ASC, created_at DESC"
             )
         else:
             rows = await db.execute_fetchall(
-                "SELECT * FROM audio_items WHERE category_id = ? ORDER BY sort_order ASC, created_at DESC",
+                "SELECT * FROM audio_items WHERE category_id = ? AND removed_at IS NULL ORDER BY sort_order ASC, created_at DESC",
                 (category_id,),
             )
         return [dict(r) for r in rows]
@@ -1600,11 +2089,11 @@ async def list_videos_by_category(category_id: Optional[int]) -> list[dict]:
     async with get_db() as db:
         if category_id is None:
             rows = await db.execute_fetchall(
-                "SELECT * FROM videos WHERE category_id IS NULL ORDER BY sort_order ASC, created_at DESC"
+                "SELECT * FROM videos WHERE category_id IS NULL AND removed_at IS NULL ORDER BY sort_order ASC, created_at DESC"
             )
         else:
             rows = await db.execute_fetchall(
-                "SELECT * FROM videos WHERE category_id = ? ORDER BY sort_order ASC, created_at DESC",
+                "SELECT * FROM videos WHERE category_id = ? AND removed_at IS NULL ORDER BY sort_order ASC, created_at DESC",
                 (category_id,),
             )
         return [dict(r) for r in rows]
@@ -1616,6 +2105,7 @@ async def clear_category_from_items(cat_id: int):
         await db.execute("UPDATE videos SET category_id = NULL WHERE category_id = ?", (cat_id,))
         await db.execute("UPDATE audio_items SET category_id = NULL WHERE category_id = ?", (cat_id,))
         await db.execute("UPDATE manga SET category_id = NULL WHERE category_id = ?", (cat_id,))
+        await db.execute("UPDATE novels SET category_id = NULL WHERE category_id = ?", (cat_id,))
         await db.commit()
 
 
@@ -1690,11 +2180,11 @@ async def bulk_move_manga(manga_ids: list[int], category_id: int | None):
 
 async def count_items_by_category(media_type: str) -> dict[int | None, int]:
     """카테고리별 아이템 수 반환"""
-    table_map = {"video": "videos", "audio": "audio_items", "manga": "manga"}
+    table_map = {"video": "videos", "audio": "audio_items", "manga": "manga", "novels": "novels", "novel": "novels"}
     table = table_map.get(media_type, "videos")
     async with get_db() as db:
         rows = await db.execute_fetchall(
-            f"SELECT category_id, COUNT(*) as cnt FROM {table} GROUP BY category_id"
+            f"SELECT category_id, COUNT(*) as cnt FROM {table} WHERE removed_at IS NULL GROUP BY category_id"
         )
         return {r["category_id"]: r["cnt"] for r in rows}
 
@@ -1755,9 +2245,9 @@ async def delete_folder(folder_id: int) -> bool:
         if not rows:
             return False
         parent_id = rows[0]["parent_id"]
-        # Reset games in this folder
+        # Removing a folder ungroups its direct contents instead of deleting library records.
         await db.execute(
-            "UPDATE games SET folder_id = NULL WHERE folder_id = ?", (folder_id,)
+            "UPDATE games SET folder_id = ? WHERE folder_id = ?", (parent_id, folder_id)
         )
         # Reparent any child folders to the deleted folder's parent
         await db.execute(
@@ -1915,7 +2405,6 @@ async def insert_subtitle_segments(subtitle_id: int, segments: list[dict]) -> in
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
-        await db.commit()
         # Update segment count on parent
         await db.execute(
             "UPDATE subtitles SET segment_count = ?, updated_at = ? WHERE id = ?",

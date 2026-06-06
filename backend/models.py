@@ -51,6 +51,7 @@ class TranslateRequest(BaseModel):
     source_lang: str = "auto"
     target_lang: str = "ko"
     preset_id: Optional[int] = None
+    use_memory: Optional[bool] = None
     start_index: Optional[int] = None  # 0-based inclusive
     end_index: Optional[int] = None    # exclusive
 

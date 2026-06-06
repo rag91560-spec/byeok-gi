@@ -1,0 +1,40 @@
+name: Compatibility report
+description: Report whether a game or engine workflow works with Varo
+title: "[Compatibility]: "
+labels: ["compatibility", "needs-triage"]
+body:
+  - type: input
+    id: engine
+    attributes:
+      label: Engine
+      placeholder: "RPG Maker MV, Unity, Unreal, Wolf RPG, unknown..."
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Result
+      options:
+        - scan works
+        - translate works
+        - apply works
+        - rollback works
+        - blocked at scan
+        - blocked at translate
+        - blocked at apply
+        - blocked at launch
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Describe what worked or failed. Do not attach game files.
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_evidence
+    attributes:
+      label: Sanitized evidence
+      description: Logs, screenshots, or file names with private data removed.
+      render: text

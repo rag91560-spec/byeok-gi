@@ -1,29 +1,32 @@
 "use client"
 
 import { useMemo, useState, useEffect, useRef } from "react"
-import { ChevronRightIcon, HomeIcon, FolderPlusIcon } from "lucide-react"
+import { ChevronRightIcon, FolderOpenIcon, HomeIcon, FolderPlusIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLocale } from "@/hooks/use-locale"
 import type { MediaCategory } from "@/lib/types"
-import { useDropTarget } from "@/hooks/use-media-dnd"
+import { useDropTarget, type DragPayload, type MediaDragType } from "@/hooks/use-media-dnd"
 import { FolderCard } from "./FolderCard"
 import { MediaGrid } from "./MediaGrid"
+import { LibraryEmptyState } from "./LibraryEmptyState"
 
 interface BreadcrumbButtonProps {
   folderId: number | null
   label: React.ReactNode
   active?: boolean
   onClick: () => void
-  onDropItem?: (folderId: number | null, itemId: number) => void
+  onDropItem?: (folderId: number | null, payload: DragPayload) => void
+  acceptType?: MediaDragType
 }
 
-function BreadcrumbButton({ folderId, label, active, onClick, onDropItem }: BreadcrumbButtonProps) {
+function BreadcrumbButton({ folderId, label, active, onClick, onDropItem, acceptType }: BreadcrumbButtonProps) {
   const drop = useDropTarget((payload) => {
     if (!onDropItem) return
-    onDropItem(folderId, payload.id)
-  })
+    onDropItem(folderId, payload)
+  }, { acceptType })
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         "flex items-center gap-1 px-2 py-1 rounded transition-colors shrink-0",
@@ -32,9 +35,30 @@ function BreadcrumbButton({ folderId, label, active, onClick, onDropItem }: Brea
           : "text-text-secondary hover:bg-overlay-4 hover:text-text-primary",
         drop.isOver && "bg-accent/20 ring-1 ring-accent",
       )}
-      onDragOver={onDropItem ? drop.onDragOver : undefined}
-      onDragLeave={onDropItem ? drop.onDragLeave : undefined}
-      onDrop={onDropItem ? drop.onDrop : undefined}
+      onDragOver={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDragOver(e)
+            }
+          : undefined
+      }
+      onDragLeave={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDragLeave()
+            }
+          : undefined
+      }
+      onDrop={
+        onDropItem
+          ? (e) => {
+              e.stopPropagation()
+              drop.onDrop(e)
+            }
+          : undefined
+      }
     >
       {label}
     </button>
@@ -48,7 +72,11 @@ interface FolderExplorerProps<T extends { id: number; category_id: number | null
   onNavigate: (folderId: number | null) => void
   onCreateFolder?: (name: string, parentId: number | null) => void
   onDropItemToFolder?: (itemId: number, folderId: number | null) => void
+  onDropItemsToFolder?: (payload: DragPayload, folderId: number | null) => void
+  acceptDropType?: MediaDragType
   onFolderContextMenu?: (folderId: number, e: React.MouseEvent) => void
+  folderPreviewAspect?: "square" | "video" | "panel"
+  onBlankMouseDown?: React.MouseEventHandler<HTMLDivElement>
   renderItem: (item: T) => React.ReactNode
   emptyState?: React.ReactNode
 }
@@ -60,7 +88,11 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
   onNavigate,
   onCreateFolder,
   onDropItemToFolder,
+  onDropItemsToFolder,
+  acceptDropType,
   onFolderContextMenu,
+  folderPreviewAspect,
+  onBlankMouseDown,
   renderItem,
   emptyState,
 }: FolderExplorerProps<T>) {
@@ -158,7 +190,8 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
           }
           active={currentFolderId === null}
           onClick={() => onNavigate(null)}
-          onDropItem={onDropItemToFolder ? (fid, iid) => onDropItemToFolder(iid, fid) : undefined}
+          onDropItem={onDropItemsToFolder ? (fid, payload) => onDropItemsToFolder(payload, fid) : onDropItemToFolder ? (fid, payload) => onDropItemToFolder(payload.primaryId, fid) : undefined}
+          acceptType={acceptDropType}
         />
         {breadcrumb.map((cat, idx) => (
           <div key={cat.id} className="flex items-center gap-1 shrink-0">
@@ -169,14 +202,16 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
               active={idx === breadcrumb.length - 1}
               onClick={() => onNavigate(cat.id)}
               onDropItem={
-                onDropItemToFolder ? (fid, iid) => onDropItemToFolder(iid, fid) : undefined
+                onDropItemsToFolder ? (fid, payload) => onDropItemsToFolder(payload, fid) : onDropItemToFolder ? (fid, payload) => onDropItemToFolder(payload.primaryId, fid) : undefined
               }
+              acceptType={acceptDropType}
             />
           </div>
         ))}
         <div className="flex-1" />
         {onCreateFolder && (
           <button
+            type="button"
             onClick={openNewFolder}
             className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded hover:bg-overlay-4 text-text-secondary hover:text-text-primary transition-colors shrink-0"
             title={t("newFolder")}
@@ -217,12 +252,14 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
             />
             <div className="flex justify-end gap-2 mt-4">
               <button
+                type="button"
                 onClick={() => setNewFolderOpen(false)}
                 className="px-3 py-1.5 text-sm rounded-md hover:bg-overlay-4 text-text-secondary hover:text-text-primary transition-colors"
               >
                 {t("cancel")}
               </button>
               <button
+                type="button"
                 onClick={submitNewFolder}
                 disabled={!newFolderName.trim()}
                 className="px-3 py-1.5 text-sm rounded-md bg-accent text-white hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -235,20 +272,19 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
       )}
 
       {/* Explorer body */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0" onMouseDown={onBlankMouseDown}>
         {isEmpty ? (
           emptyState ?? (
-            <div className="flex flex-col items-center justify-center h-full gap-2 text-text-tertiary">
-              <p className="text-sm">{t("emptyFolder")}</p>
-            </div>
+            <LibraryEmptyState icon={<FolderOpenIcon />} title={t("emptyFolder")} />
           )
         ) : (
-          <MediaGrid>
+          <MediaGrid onMouseDown={onBlankMouseDown}>
             {childFolders.map((cat) => (
               <FolderCard
                 key={`folder-${cat.id}`}
                 id={cat.id}
                 name={cat.name}
+                previewAspect={folderPreviewAspect}
                 childFolderCount={counts.childCountByParent.get(cat.id) ?? 0}
                 itemCount={counts.itemCountByCat.get(cat.id) ?? 0}
                 onOpen={() => onNavigate(cat.id)}
@@ -260,11 +296,9 @@ export function FolderExplorer<T extends { id: number; category_id: number | nul
                       }
                     : undefined
                 }
-                onDropItem={
-                  onDropItemToFolder
-                    ? (itemId) => onDropItemToFolder(itemId, cat.id)
-                    : undefined
-                }
+                onDropItems={onDropItemsToFolder ? (payload) => onDropItemsToFolder(payload, cat.id) : undefined}
+                onDropItem={!onDropItemsToFolder && onDropItemToFolder ? (itemId) => onDropItemToFolder(itemId, cat.id) : undefined}
+                acceptType={acceptDropType}
               />
             ))}
             {currentItems.map((item) => (

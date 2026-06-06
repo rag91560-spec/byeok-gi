@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useLocale } from "@/hooks/use-locale"
 import { api } from "@/lib/api"
 import type { SubtitleSegment, SubtitleGlossaryEntry } from "@/lib/types"
@@ -58,7 +58,7 @@ function highlightGlossaryTerms(
           title={tooltip}
         >
           {part}
-          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 text-[10px] bg-popover border rounded shadow-sm whitespace-nowrap opacity-0 group-hover/mark:opacity-100 pointer-events-none z-50 transition-opacity">
+          <span className="absolute bottom-full left-1/2 z-[60] mb-1 max-w-[min(20rem,80vw)] -translate-x-1/2 rounded border bg-popover px-1.5 py-0.5 text-left text-[10px] opacity-0 shadow-sm transition-opacity pointer-events-none whitespace-normal break-words group-hover/mark:opacity-100">
             {tooltip}
           </span>
         </mark>
@@ -128,10 +128,10 @@ export function SubtitleEditor({ segments, currentTime, onSeek, onSegmentsChange
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">
       {/* Header */}
-      <div className="sticky top-0 bg-background z-10 grid grid-cols-[80px_1fr_1fr] gap-2 px-3 py-2 border-b text-xs font-medium text-muted-foreground">
+      <div className="sticky top-0 bg-background z-10 grid grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-3 py-2 border-b text-xs font-medium text-muted-foreground">
         <div>{t("subtitleDuration")}</div>
-        <div>{t("subtitleOriginal")}</div>
-        <div>{t("subtitleTranslation")}</div>
+        <div className="min-w-0 truncate">{t("subtitleOriginal")}</div>
+        <div className="min-w-0 truncate">{t("subtitleTranslation")}</div>
       </div>
 
       {/* Segments */}
@@ -143,7 +143,7 @@ export function SubtitleEditor({ segments, currentTime, onSeek, onSegmentsChange
           <div
             key={seg.id}
             ref={isActive ? activeRef : undefined}
-            className={`group relative grid grid-cols-[80px_1fr_1fr] gap-2 px-3 py-1.5 border-b text-sm cursor-pointer transition-colors ${
+            className={`group relative grid grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-3 py-1.5 border-b text-sm cursor-pointer transition-colors ${
               isActive
                 ? "bg-primary/10 border-l-2 border-l-primary"
                 : isLowConf
@@ -166,7 +166,7 @@ export function SubtitleEditor({ segments, currentTime, onSeek, onSegmentsChange
 
             {/* Original */}
             <div
-              className="min-h-[1.5em]"
+              className="min-w-0 min-h-[1.5em]"
               onDoubleClick={() => startEdit(seg, "original")}
             >
               {editingId === seg.id && editField === "original" ? (
@@ -181,13 +181,13 @@ export function SubtitleEditor({ segments, currentTime, onSeek, onSegmentsChange
                   disabled={saving}
                 />
               ) : (
-                <span className="whitespace-pre-wrap">{highlightGlossaryTerms(seg.original_text, glossary || [], "source")}</span>
+                <span className="whitespace-pre-wrap break-words">{highlightGlossaryTerms(seg.original_text, glossary || [], "source")}</span>
               )}
             </div>
 
             {/* Translation */}
             <div
-              className="min-h-[1.5em]"
+              className="min-w-0 min-h-[1.5em]"
               onDoubleClick={() => startEdit(seg, "translated")}
             >
               {editingId === seg.id && editField === "translated" ? (
@@ -202,7 +202,7 @@ export function SubtitleEditor({ segments, currentTime, onSeek, onSegmentsChange
                   disabled={saving}
                 />
               ) : (
-                <span className={`whitespace-pre-wrap ${seg.translated_text ? "text-foreground" : "text-muted-foreground italic"}`}>
+                <span className={`whitespace-pre-wrap break-words ${seg.translated_text ? "text-foreground" : "text-muted-foreground italic"}`}>
                   {seg.translated_text ? highlightGlossaryTerms(seg.translated_text, glossary || [], "target") : "—"}
                 </span>
               )}

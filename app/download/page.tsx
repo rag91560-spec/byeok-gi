@@ -19,6 +19,7 @@ import { useLocale } from "@/hooks/use-locale"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://api.closedclaws.com"
 const FANBOX_URL = process.env.NEXT_PUBLIC_FANBOX_URL || "https://minhyung.fanbox.cc"
+const DOWNLOAD_HOSTS = new Set(["api.closedclaws.com", "closedclaws.com"])
 
 interface VerifyResult {
   valid: boolean
@@ -78,9 +79,13 @@ export default function DownloadPage() {
       })
       const data: DownloadResult = await res.json()
       if (data.download_url) {
-        setDownloadLink(data.download_url)
+        const url = new URL(data.download_url)
+        if (url.protocol !== "https:" || !DOWNLOAD_HOSTS.has(url.hostname)) {
+          throw new Error("Untrusted download URL")
+        }
+        setDownloadLink(url.toString())
         // Auto-start download
-        window.open(data.download_url, "_blank")
+        window.open(url.toString(), "_blank", "noopener,noreferrer")
       }
     } catch {
       setVerifyError(t("downloadLinkFailed"))

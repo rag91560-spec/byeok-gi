@@ -5,7 +5,6 @@ import { XIcon, FolderIcon, ChevronDownIcon, SparklesIcon, Trash2Icon } from "lu
 import { Button } from "@/components/ui/button"
 import { useLocale } from "@/hooks/use-locale"
 import type { MediaCategory } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 interface SelectionBarProps {
   selectedCount: number
@@ -14,6 +13,8 @@ interface SelectionBarProps {
   onDeselectAll: () => void
   onBulkTranslate?: () => void
   onBulkDelete?: () => void
+  onCreateFolderFromSelection?: () => void
+  removeActionKind?: "remove-from-library" | "delete-managed-files"
 }
 
 export function SelectionBar({
@@ -23,6 +24,8 @@ export function SelectionBar({
   onDeselectAll,
   onBulkTranslate,
   onBulkDelete,
+  onCreateFolderFromSelection,
+  removeActionKind = "remove-from-library",
 }: SelectionBarProps) {
   const { t } = useLocale()
   const [showDropdown, setShowDropdown] = useState(false)
@@ -42,8 +45,8 @@ export function SelectionBar({
   if (selectedCount === 0) return null
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 bg-accent/10 border border-accent/20 rounded-lg">
-      <span className="text-sm font-medium text-text-primary">
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-accent/10 border border-accent/20 rounded-lg">
+      <span className="min-w-0 text-sm font-medium text-text-primary">
         {t("itemsSelected").replace("{count}", String(selectedCount))}
       </span>
 
@@ -53,7 +56,7 @@ export function SelectionBar({
           size="sm"
           variant="secondary"
           onClick={() => setShowDropdown(!showDropdown)}
-          className="gap-1.5"
+          className="max-w-full gap-1.5"
         >
           <FolderIcon className="size-3.5" />
           {t("moveTo")}
@@ -87,10 +90,22 @@ export function SelectionBar({
           size="sm"
           variant="secondary"
           onClick={onBulkTranslate}
-          className="gap-1.5"
+          className="max-w-full gap-1.5"
         >
           <SparklesIcon className="size-3.5" />
           {t("translate")}
+        </Button>
+      )}
+
+      {onCreateFolderFromSelection && (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={onCreateFolderFromSelection}
+          className="max-w-full gap-1.5"
+        >
+          <FolderIcon className="size-3.5" />
+          {t("createGroupFromSelection")}
         </Button>
       )}
 
@@ -100,17 +115,17 @@ export function SelectionBar({
           size="sm"
           variant="destructive"
           onClick={onBulkDelete}
-          className="gap-1.5"
+          className="max-w-full gap-1.5"
         >
           <Trash2Icon className="size-3.5" />
-          {t("delete")}
+          {removeActionKind === "delete-managed-files" ? t("deleteManagedFiles") : t("removeFromLibrary")}
         </Button>
       )}
 
       {/* Deselect all */}
       <button
         onClick={onDeselectAll}
-        className="ml-auto flex items-center gap-1 text-xs text-text-tertiary hover:text-text-primary transition-colors"
+        className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-primary transition-colors sm:ml-auto"
       >
         <XIcon className="size-3.5" />
         {t("deselectAll")}

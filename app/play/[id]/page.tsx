@@ -49,7 +49,7 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
 
   const openInNewWindow = useCallback(() => {
     if (serveUrl) {
-      window.open(serveUrl, "_blank", "width=1280,height=720")
+      window.open(serveUrl, "_blank", "width=1280,height=720,noopener,noreferrer")
     }
   }, [serveUrl])
 
@@ -111,7 +111,7 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
           <iframe
             src={serveUrl}
             className="w-full h-full border-none"
-            sandbox="allow-scripts allow-same-origin allow-popups"
+            sandbox="allow-scripts"
             title={game?.title || "Game"}
           />
         ) : (

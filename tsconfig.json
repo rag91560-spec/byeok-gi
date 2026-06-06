@@ -33,9 +33,18 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-electron-dev/types/**/*.ts",
+    ".next-electron-dev/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".next",
+    ".next-electron-dev",
+    ".next-electron-dev-*",
+    "dist",
+    "dist-electron",
+    "backend-dist",
+    "logs"
   ]
 }

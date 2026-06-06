@@ -7,21 +7,39 @@ node_modules/
 out/
 dist/
 build/
+!build/
+build/*
+!build/icon.ico
+!build/icon.icns
+!build/icon.png
+!build/installer.nsh
 *.pyc
 __pycache__/
 data/*.db
 data/*.db-wal
 data/*.db-shm
 data/audio/
+data/covers/
+data/*.db.backup-*
 data/*.log
 data/hardsub/
 data/manga_rendered/
 data/subtitle_audio/
 data/thumbnails/
+extracted/
+logs/
+.omx/
+.tmp*/
 test_rendered_check.png
 .env
 .env.local
-logs/
+marketing/profiles/
+marketing/*cookies*.json
+**/Cookies*
+**/Local Storage/
+**/Session Storage/
+**/Login Data*
+**/Secure Preferences
 *.exe
 *.dll
 dist-electron/

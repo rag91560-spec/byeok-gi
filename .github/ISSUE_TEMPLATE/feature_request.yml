@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a Varo improvement or engine support request
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow is blocked or painful?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Varo do differently?
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: Related engine or workflow
+      placeholder: "Unity, Unreal, RPG Maker, manga OCR, subtitles..."
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This request does not require uploading copyrighted game content.
+          required: true

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import contextlib
 import shutil
 import subprocess
 import uuid
@@ -241,14 +242,33 @@ async def bulk_move_videos(body: BulkMoveRequest):
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_videos(body: BulkDeleteRequest):
+async def legacy_bulk_remove_videos_from_library(body: BulkDeleteRequest):
+    """Legacy alias. Soft-removes from the library; does not delete source files."""
     if not body.ids:
         raise HTTPException(400, "ids must not be empty")
-    deleted = 0
-    for vid in body.ids:
-        if await db.delete_video(vid):
-            deleted += 1
-    return {"ok": True, "deleted": deleted}
+    count = await db.remove_from_library("video", body.ids)
+    return {"ok": True, "removed": count, "deleted": count, "count": count, "ids": body.ids}
+
+
+@router.get("/trash")
+async def list_video_trash():
+    return await db.list_trash_items("video")
+
+
+@router.post("/remove-from-library")
+async def remove_videos_from_library(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.remove_from_library("video", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
+
+
+@router.post("/restore-from-trash")
+async def restore_videos_from_trash(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.restore_from_trash("video", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
 
 
 @router.get("")
@@ -286,16 +306,18 @@ async def upload_video(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
-    chunks = []
     total = 0
-    while chunk := await file.read(8192):
-        total += len(chunk)
-        if total > MAX_VIDEO_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large (max 500MB)")
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    with open(dest, "wb") as f:
-        f.write(content)
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_VIDEO_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large (max 500MB)")
+                f.write(chunk)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(dest)
+        raise
     title = os.path.splitext(file.filename or "video")[0]
     abs_dest = os.path.abspath(dest)
     video = await db.create_video(
@@ -304,7 +326,7 @@ async def upload_video(file: UploadFile = File(...)):
         source=abs_dest,
         thumbnail="",
         duration=probe_media_duration(abs_dest),
-        size=len(content),
+        size=total,
         sort_order=0,
     )
     # Auto-extract thumbnail
@@ -324,11 +346,13 @@ async def update_video(video_id: int, body: VideoUpdate):
 
 
 @router.delete("/{video_id}")
-async def delete_video(video_id: int):
-    deleted = await db.delete_video(video_id)
-    if not deleted:
+async def legacy_delete_video_removes_from_library(video_id: int):
+    """Legacy DELETE alias. Soft-removes from the library; does not delete source files."""
+    video = await db.get_video(video_id)
+    if not video:
         raise HTTPException(404, "Video not found")
-    return {"ok": True}
+    count = await db.remove_from_library("video", [video_id])
+    return {"ok": True, "count": count, "ids": [video_id]}
 
 
 @router.get("/{video_id}/serve")

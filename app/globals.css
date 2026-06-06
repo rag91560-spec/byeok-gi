@@ -1,4 +1,8 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "../app";
+@source "../components";
+@source "../hooks";
+@source "../lib";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -129,6 +133,89 @@ input[type="radio"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+select {
+  color-scheme: dark;
+}
+
+.light select {
+  color-scheme: light;
+}
+
+select option {
+  background-color: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+select option:checked {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
+select option:disabled {
+  color: var(--text-tertiary);
+}
+
+/* ── Explorer tile grid / hover frame ── */
+.explorer-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 136px));
+  align-items: start;
+  justify-content: start;
+  gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .explorer-tile-grid {
+    grid-template-columns: repeat(auto-fill, minmax(128px, 148px));
+  }
+}
+
+.card-hover-frame {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: background-color 160ms ease;
+}
+.card-hover-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: none;
+  transition: box-shadow 160ms ease;
+}
+.card-hover-frame:hover,
+.group:hover .card-hover-frame,
+.card-hover-frame[data-hover-active="true"] {
+  background-color: var(--overlay-4);
+}
+.card-hover-frame:hover::after,
+.group:hover .card-hover-frame::after,
+.card-hover-frame[data-hover-active="true"]::after {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tile-cover-text {
+  color: var(--text-primary);
+}
+
+.tile-cover-meta {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tile-cover-shade {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--background) 94%, transparent),
+    color-mix(in srgb, var(--background) 54%, transparent) 34%,
+    color-mix(in srgb, var(--background) 18%, transparent) 62%,
+    transparent
+  );
 }
 
 /* ── Video player center feedback ── */

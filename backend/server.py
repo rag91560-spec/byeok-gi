@@ -2,7 +2,9 @@
 
 import logging
 import os
+import re
 import traceback
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +13,22 @@ from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
 
+if os.environ.get("GT_ALLOW_BACKEND_PROXY") != "1":
+    for _proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        os.environ.pop(_proxy_var, None)
+
+_SECRET_FIELD_RE = re.compile(
+    r"(?i)(\"?(?:api[_-]?keys?|license[_-]?key|token|secret|password|authorization|x-api-key)\"?\s*[:=]\s*)([\"']?)[^\"',\s}]+"
+)
+_BEARER_RE = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+")
+
+
+def _redact_sensitive(text: str) -> str:
+    text = _SECRET_FIELD_RE.sub(r"\1\2[REDACTED]", text)
+    return _BEARER_RE.sub(r"\1[REDACTED]", text)
+
 from . import db
-from .routers import games, translate, settings, covers, presets, memory, models, sync, android, qa, export_import, glossary, media, live, videos, manga, audio, categories, agent, filesystem, subtitle
+from .routers import games, translate, settings, covers, presets, memory, models, sync, android, qa, export_import, glossary, media, live, videos, manga, audio, novels, categories, agent, filesystem, subtitle
 
 _data_dir = os.environ.get("GT_DATA_DIR") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 COVERS_DIR = os.path.join(_data_dir, "covers")
@@ -22,14 +38,19 @@ THUMBS_DIR = os.path.join(_data_dir, "thumbnails")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
-    # Pre-load NLLB model in background to avoid first-request timeout
+
+    # Pre-load NLLB model after startup without blocking the API server.
+    async def _preload_nllb_background():
+        try:
+            from .offline_translate import _load as preload_nllb, is_available
+            if is_available():
+                await asyncio.to_thread(preload_nllb)
+        except Exception as e:
+            logging.getLogger(__name__).warning("NLLB preload skipped: %s", e)
+
     try:
-        from .offline_translate import _load as preload_nllb, is_available
-        if is_available():
-            import asyncio
-            await asyncio.to_thread(preload_nllb)
+        asyncio.create_task(_preload_nllb_background())
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning("NLLB preload skipped: %s", e)
     yield
 
@@ -43,7 +64,7 @@ app = FastAPI(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch all unhandled exceptions — log full traceback and return structured 500."""
-    tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    tb = [_redact_sensitive(line) for line in traceback.format_exception(type(exc), exc, exc.__traceback__)]
     logger.error(
         "Unhandled %s at %s %s\n%s",
         type(exc).__name__, request.method, request.url.path, "".join(tb),
@@ -51,14 +72,17 @@ async def global_exception_handler(request: Request, exc: Exception):
     # Collect request context for debugging
     ctx_lines = []
     try:
-        ctx_lines.append(f"Query: {dict(request.query_params)}" if request.query_params else "")
+        ctx_lines.append(
+            f"Query: {_redact_sensitive(str(dict(request.query_params)))}"
+            if request.query_params else ""
+        )
         ctx_lines.append(f"Path params: {request.path_params}" if request.path_params else "")
         # Try to read body (may already be consumed)
         try:
             body = await request.body()
             if body:
                 body_str = body.decode("utf-8", errors="replace")[:2000]
-                ctx_lines.append(f"Body: {body_str}")
+                ctx_lines.append(f"Body: {_redact_sensitive(body_str)}")
         except Exception:
             pass
     except Exception:
@@ -79,13 +103,13 @@ async def global_exception_handler(request: Request, exc: Exception):
         pass
     return JSONResponse(
         status_code=500,
-        content={"detail": f"{type(exc).__name__}: {exc}"},
+        content={"detail": "Internal server error. See crash log for details."},
     )
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3100"],
+    allow_origins=["http://localhost:3100", "http://127.0.0.1:3100"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
@@ -110,6 +134,7 @@ app.include_router(live.router)
 app.include_router(videos.router)
 app.include_router(manga.router)
 app.include_router(audio.router)
+app.include_router(novels.router)
 app.include_router(categories.router)
 app.include_router(agent.router)
 app.include_router(filesystem.router)

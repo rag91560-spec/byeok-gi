@@ -18,6 +18,7 @@ export interface Game {
   play_time_minutes: number
   created_at: string
   updated_at: string
+  removed_at: string | null
   platform: "windows" | "android"
   package_name: string
   original_path: string
@@ -39,6 +40,7 @@ export interface TranslateRequest {
   source_lang?: string
   target_lang?: string
   preset_id?: number
+  use_memory?: boolean
   start_index?: number
   end_index?: number
 }
@@ -261,6 +263,7 @@ export interface TranslationEntry {
   review_status?: string
   reviewer_note?: string
   edited_at?: string
+  _translation_schema?: string
 }
 
 export interface TranslationStringsResponse {
@@ -344,6 +347,7 @@ export interface VideoItem {
   sort_order: number
   created_at: string
   updated_at: string
+  removed_at: string | null
 }
 
 export interface AudioItem {
@@ -360,12 +364,13 @@ export interface AudioItem {
   translated_script?: string
   created_at: string
   updated_at: string
+  removed_at: string | null
 }
 
 export interface MediaCategory {
   id: number
   name: string
-  media_type: "video" | "audio" | "manga"
+  media_type: "video" | "audio" | "manga" | "novels"
   sort_order: number
   parent_id: number | null
   item_count?: number
@@ -400,7 +405,78 @@ export interface MangaItem {
   translated_pages?: number
   created_at: string
   updated_at: string
+  removed_at: string | null
   images?: string[]
+}
+
+export type NovelTranslationStatus = "original" | "partial" | "complete"
+
+export interface NovelStyleRange {
+  id: string
+  start: number
+  end: number
+  color?: string
+  backgroundColor?: string
+  fontSize?: number
+  fontWeight?: "normal" | "medium" | "semibold" | "bold"
+  fontStyle?: "normal" | "italic"
+  textDecoration?: "none" | "underline"
+}
+
+export interface NovelContentStyle {
+  ranges: NovelStyleRange[]
+}
+
+export interface NovelItem {
+  id: number
+  title: string
+  file_name: string
+  extension: string
+  source_path: string
+  source_path_allowed: boolean
+  preview: string
+  content_hash: string
+  size: number
+  category_id: number | null
+  metadata_only: boolean
+  translation_status: NovelTranslationStatus
+  translated_text_path: string
+  translation_project_id: number | null
+  read_progress: number
+  last_opened_at: string | null
+  reader_settings_json: string
+  content_style_json: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+  removed_at: string | null
+  content?: string
+}
+
+export interface NovelImportPathInput {
+  path: string
+  source_grant?: string
+}
+
+export interface NovelImportSummary {
+  success: number
+  duplicates: number
+  unsupported: number
+  failed: number
+}
+
+export interface NovelImportFailure {
+  path: string
+  error: string
+}
+
+export interface NovelImportResult {
+  items?: NovelItem[]
+  created_items?: NovelItem[]
+  created_categories?: MediaCategory[]
+  summary: NovelImportSummary
+  failures?: NovelImportFailure[]
+  total?: number
 }
 
 export interface MangaTranslationEntry {
@@ -650,7 +726,7 @@ export interface VisionEntry {
 
 export interface LiveTranslationAPI {
   listSources: () => Promise<CaptureSource[]>
-  captureScreen: (opts: { sourceId: string; region?: CaptureRegion | null }) => Promise<{ image?: string; error?: string }>
+  captureScreen: (opts: { sourceId: string; region?: CaptureRegion | null }) => Promise<{ image?: string; error?: string; errorCode?: string }>
   showOverlay: (opts?: { bounds?: { x: number; y: number; width: number; height: number } }) => Promise<void>
   hideOverlay: () => Promise<void>
   updateOverlay: (data: unknown) => Promise<void>
@@ -685,12 +761,14 @@ export interface ElectronAPI {
   selectApkFile: () => Promise<string[]>
   selectApkFolder: () => Promise<string>
   selectSubtitleFiles: () => Promise<string[]>
+  selectNovelFiles: () => Promise<Array<string | NovelImportPathInput>>
   openHtmlGame: (opts: { gameId: number; title: string; serveUrl: string }) => Promise<void>
   closeHtmlGame: (opts: { gameId: number }) => Promise<void>
   showConfirm: (message: string) => Promise<boolean>
   selectVideoFiles: () => Promise<string[]>
   selectVideoFolder: () => Promise<string>
   selectAudioFolder: () => Promise<string>
+  launchNativeGame: (opts: { exePath: string }) => Promise<{ ok: boolean; pid?: number }>
   registerKillHotkey: (key: string) => Promise<boolean>
   unregisterKillHotkey: () => Promise<void>
   liveTranslation: LiveTranslationAPI

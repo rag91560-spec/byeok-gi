@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils"
-import { FilmIcon, MusicIcon, Trash2Icon, ClockIcon, FolderIcon, CheckIcon, ImagePlusIcon } from "lucide-react"
+import { Trash2Icon, CheckIcon } from "lucide-react"
 import { useLocale } from "@/hooks/use-locale"
 import type { MediaCategory } from "@/lib/types"
-import { useDragItem, useMergeTarget } from "@/hooks/use-media-dnd"
+import { useDragItem, useMergeTarget, type DragPayload } from "@/hooks/use-media-dnd"
+import { ExplorerTileIcon } from "./ExplorerTileIcon"
 
 function formatDuration(seconds: number): string {
   if (!seconds || seconds <= 0) return ""
@@ -33,11 +34,15 @@ interface MediaCardProps {
   selectable?: boolean
   selected?: boolean
   onSelect?: (checked: boolean) => void
+  onSelectionClick?: (event: React.MouseEvent) => boolean
+  getDragIds?: (primaryId: number) => number[]
+  sourceSurface?: string
+  layout?: "compact" | "panel"
   onClick: () => void
   onDelete?: () => void
   onChangeThumbnail?: () => void
   onMoveToCategory?: (categoryId: number | null) => void
-  onMergeDrop?: (draggedId: number) => void
+  onMergeDrop?: (payload: DragPayload) => void
 }
 
 export function MediaCard({
@@ -53,36 +58,50 @@ export function MediaCard({
   selectable,
   selected,
   onSelect,
+  onSelectionClick,
+  getDragIds,
+  sourceSurface,
+  layout = "compact",
   onClick,
   onDelete,
-  onChangeThumbnail,
   onMoveToCategory,
   onMergeDrop,
 }: MediaCardProps) {
   const { t } = useLocale()
   const isVideo = mediaType === "video"
-  const FallbackIcon = isVideo ? FilmIcon : MusicIcon
+  const isPanel = layout === "panel"
   const [showMenu, setShowMenu] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
   const menuRef = useRef<HTMLDivElement>(null)
 
   // DnD: drag source
-  const drag = useDragItem(mediaType, id ?? 0)
+  const drag = useDragItem(mediaType, id ?? 0, { getIds: getDragIds, sourceSurface })
   const dragProps = id
     ? { draggable: drag.draggable, onDragStart: drag.onDragStart, onDragEnd: drag.onDragEnd }
     : {}
 
   // DnD: merge target
   const mergeHandler = useCallback(
-    (draggedId: number) => { if (draggedId !== id) onMergeDrop?.(draggedId) },
+    (payload: DragPayload) => {
+      if (!id || payload.ids.includes(id)) return
+      onMergeDrop?.(payload)
+    },
     [id, onMergeDrop],
   )
-  const merge = useMergeTarget(mergeHandler)
+  const merge = useMergeTarget(mergeHandler, 500, { acceptType: mediaType })
   const mergeProps = onMergeDrop && id
     ? { onDragOver: merge.onDragOver, onDragLeave: merge.onDragLeave, onDrop: merge.onDrop }
     : {}
 
   const currentCatName = categories?.find((c) => c.id === categoryId)?.name
+  const thumbnailUrl = thumbnail?.trim()
+  const hasThumbnail = Boolean(thumbnailUrl)
+  const metaParts = [
+    duration && duration > 0 ? formatDuration(duration) : null,
+    size && size > 0 ? formatSize(size) : null,
+    currentCatName,
+  ].filter(Boolean)
+  const metaText = metaParts.join(" · ")
 
   // Close menu on outside click
   useEffect(() => {
@@ -112,131 +131,124 @@ export function MediaCard({
   return (
     <>
       <div
+        data-testid={id ? `media-card-${mediaType}-${id}` : undefined}
         className={cn(
-          "group relative rounded-xl overflow-hidden cursor-pointer",
-          "bg-surface border",
+          "group relative cursor-pointer rounded-md transition-colors duration-150 ease-out",
           merge.showMerge
-            ? "border-accent ring-2 ring-accent/50 animate-pulse"
+            ? "animate-pulse"
             : selected
-              ? "border-accent shadow-md shadow-accent/20 ring-1 ring-accent/30"
+              ? ""
               : isActive
-                ? "border-accent shadow-md shadow-accent/10"
-                : "border-border-subtle hover:border-accent/40 hover:shadow-lg hover:shadow-accent/5",
-          "transition-all duration-200"
+                ? ""
+                : "",
         )}
-        onClick={onClick}
+        onClick={(event) => {
+          if (id && onSelectionClick?.(event)) return
+          onClick()
+        }}
         onContextMenu={handleContextMenu}
         {...dragProps}
         {...mergeProps}
       >
-        {/* Thumbnail */}
-        <div className={cn(
-          "bg-surface-elevated relative overflow-hidden",
-          isVideo ? "aspect-video" : "aspect-square"
-        )}>
-          {thumbnail ? (
-            <img
-              src={thumbnail}
-              alt={title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              loading="lazy"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-text-tertiary">
-              <FallbackIcon className="size-10 opacity-20" />
-            </div>
+        <div
+          className={cn(
+            "card-hover-frame flex w-full flex-col rounded-md px-2 py-2.5",
+            isPanel
+              ? "aspect-[3/4]"
+              : "min-h-[120px]",
+            hasThumbnail
+              ? "justify-end bg-cover bg-center text-left"
+              : "items-center text-center",
+          )}
+          style={hasThumbnail ? { backgroundImage: `url("${thumbnailUrl}")` } : undefined}
+          data-hover-active={merge.showMerge || selected || isActive ? "true" : undefined}
+        >
+          {hasThumbnail && (
+            <div className="tile-cover-shade pointer-events-none absolute inset-0 z-0" />
           )}
 
           {/* Selection checkbox */}
           {selectable && (
             <button
+              data-testid={id ? `media-select-${mediaType}-${id}` : undefined}
               onClick={handleCheckboxClick}
               className={cn(
-                "absolute top-2 left-2 size-5 rounded border-2 flex items-center justify-center transition-all z-10",
+                "absolute left-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded border-2 transition-all",
                 selected
                   ? "bg-accent border-accent text-white"
-                  : "border-white/60 bg-black/30 opacity-0 group-hover:opacity-100 hover:border-white"
+                  : "border-text-tertiary/70 bg-background/80 opacity-0 hover:border-text-secondary group-hover:opacity-100"
               )}
+              aria-label={selected ? t("deselectAll") : t("selectItem")}
             >
               {selected && <CheckIcon className="size-3.5" strokeWidth={3} />}
             </button>
           )}
 
-          {/* Duration badge */}
-          {!!duration && duration > 0 && (
-            <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1">
-              <ClockIcon className="size-3" />
-              {formatDuration(duration)}
+          {!selected && onDelete && (
+            <div className="absolute right-1.5 top-1.5 z-20 flex flex-col gap-1.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete()
+                }}
+                className="rounded-full bg-black/70 p-1.5 text-white opacity-0 shadow-sm transition-all hover:bg-error/85 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 group-hover:opacity-100"
+                title={t("removeFromLibrary")}
+                aria-label={t("removeFromLibrary")}
+              >
+                <Trash2Icon className="size-3.5" />
+              </button>
             </div>
-          )}
-
-          {/* Size badge */}
-          {!!size && size > 0 && (
-            <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-              {formatSize(size)}
-            </div>
-          )}
-
-          {/* Delete button */}
-          {onDelete && !selected && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
-              }}
-              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-error/80 text-white p-1.5 rounded-lg transition-all"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          )}
-
-          {/* Change thumbnail button */}
-          {onChangeThumbnail && !selected && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onChangeThumbnail()
-              }}
-              className="absolute bottom-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-accent/80 text-white p-2 rounded-full transition-all z-10"
-              title={t("changeThumbnail")}
-            >
-              <ImagePlusIcon className="size-4" />
-            </button>
           )}
 
           {/* Active indicator */}
           {isActive && !selected && (
-            <div className="absolute top-2 left-2">
+            <div className="absolute left-2 top-2 z-10">
               <span className="size-2.5 rounded-full bg-accent animate-pulse inline-block" />
             </div>
           )}
 
           {/* Selected overlay */}
           {selected && (
-            <div className="absolute inset-0 bg-accent/10 pointer-events-none" />
+            <div className="absolute inset-0 z-[5] bg-accent/10 pointer-events-none" />
           )}
 
           {/* Merge overlay */}
           {merge.showMerge && (
-            <div className="absolute inset-0 bg-accent/20 flex items-center justify-center pointer-events-none z-20">
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-accent/20 pointer-events-none">
               <span className="bg-accent text-white text-xs font-bold px-3 py-1.5 rounded-lg">
                 {t("createGroup")}
               </span>
             </div>
           )}
-        </div>
-
-        {/* Title + category */}
-        <div className="p-2.5">
-          <h3 className="text-sm font-medium text-text-primary truncate" title={title}>
-            {title}
-          </h3>
-          {currentCatName && (
-            <p className="text-[10px] text-text-tertiary mt-0.5 flex items-center gap-1 truncate">
-              <FolderIcon className="size-3 shrink-0" />
-              {currentCatName}
-            </p>
+          {!hasThumbnail && (
+            <div className={cn("flex w-full items-center justify-center", isPanel ? "min-h-0 flex-1" : "h-16")}>
+              <ExplorerTileIcon kind={isVideo ? "video" : "audio"} />
+            </div>
           )}
+
+          {/* Title + category */}
+          <div className={cn("relative z-10 w-full min-w-0", !isPanel && !hasThumbnail ? "mt-2" : "")}>
+            <h3
+              className={cn(
+                "truncate text-[13px] font-medium leading-5",
+                hasThumbnail ? "tile-cover-text" : "text-text-primary",
+              )}
+              title={title}
+            >
+              {title}
+            </h3>
+            {metaText && (
+              <p
+                className={cn(
+                  "mt-0.5 h-4 truncate text-[11px] leading-4",
+                  hasThumbnail ? "tile-cover-text tile-cover-meta" : "text-text-tertiary",
+                )}
+                title={metaText}
+              >
+                {metaText}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

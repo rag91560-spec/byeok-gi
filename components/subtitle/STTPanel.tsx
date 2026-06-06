@@ -54,7 +54,6 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
 
   // Summary card after STT completion
   if (showSummary && subtitle) {
-    const lowConfCount = 0 // Will be calculated when segments are available
     return (
       <div className="space-y-3 p-4 border rounded-lg bg-card">
         <div className="flex items-center gap-2">
@@ -66,29 +65,29 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
           <h3 className="font-medium text-sm">{t("sttCompleted")}</h3>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span>{t("sttSegmentCount").replace("{count}", String(subtitle.segment_count))}</span>
           {subtitle.duration > 0 && (
             <span>{t("sttEstDuration").replace("{duration}", `${Math.round(subtitle.duration)}s`)}</span>
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => { setShowSummary(false); onComplete?.() }}
-            className="px-4 py-1.5 text-sm border rounded-md hover:bg-accent"
+            className="min-w-0 px-4 py-1.5 text-sm border rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             {t("reviewSegments")}
           </button>
           <button
             onClick={() => { setShowSummary(false); onTranslateNow?.() }}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            className="min-w-0 px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             {t("translateNow")}
           </button>
           <button
             onClick={() => { setShowSummary(false) }}
-            className="px-4 py-1.5 text-sm border rounded-md hover:bg-accent text-muted-foreground"
+            className="min-w-0 px-4 py-1.5 text-sm border rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-muted-foreground"
           >
             {t("reRecognize")}
           </button>
@@ -102,10 +101,10 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
       <h3 className="font-medium text-sm">{t("sttProvider")}</h3>
 
       {/* Provider select */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setProvider("whisper_api")}
-          className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${
+          className={`px-3 py-1.5 text-xs rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
             provider === "whisper_api" ? "bg-primary text-primary-foreground" : "hover:bg-accent"
           }`}
         >
@@ -114,7 +113,7 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
         <button
           disabled
           className="px-3 py-1.5 text-xs rounded-md border opacity-50 cursor-not-allowed"
-          title="Phase 3"
+          title={t("comingSoon")}
         >
           {t("whisperLocal")}
         </button>
@@ -126,7 +125,7 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
-          className="w-full mt-1 text-sm border rounded-md px-2 py-1.5 bg-background"
+          className="w-full min-w-0 mt-1 text-sm border rounded-md px-2 py-1.5 bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <option value="">{t("autoDetect")}</option>
           <option value="ja">{t("japanese")}</option>
@@ -168,12 +167,12 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
       )}
 
       {/* Actions */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {!isRunning && !extracting && (
           <button
             onClick={handleStart}
             disabled={!subtitle}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {!subtitle ? "..." : t("sttStart")}
           </button>
@@ -181,7 +180,7 @@ export function STTPanel({ subtitle, mediaId, mediaType, onComplete, onTranslate
         {(isRunning || extracting) && (
           <button
             onClick={cancelJob}
-            className="px-4 py-1.5 text-sm border rounded-md hover:bg-destructive/10 text-destructive"
+            className="px-4 py-1.5 text-sm border rounded-md hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50 text-destructive"
           >
             {t("cancel")}
           </button>

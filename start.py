@@ -6,9 +6,34 @@ import os
 import time
 import webbrowser
 import signal
+from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-BACKEND_PORT = 8000
+
+
+def parse_port(value, fallback):
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return port if 0 < port < 65536 else fallback
+
+
+def port_from_backend_api(value):
+    if not value:
+        return None
+    try:
+        return urlparse(value).port
+    except ValueError:
+        return None
+
+
+BACKEND_API = os.environ.get("GT_BACKEND_API")
+BACKEND_PORT = parse_port(
+    os.environ.get("GT_BACKEND_PORT"),
+    port_from_backend_api(BACKEND_API) or 8001,
+)
+BACKEND_API = BACKEND_API or f"http://127.0.0.1:{BACKEND_PORT}/api"
 FRONTEND_PORT = 3100
 
 processes = []
@@ -20,6 +45,7 @@ def start_backend():
         [sys.executable, "-m", "uvicorn", "backend.server:app",
          "--host", "0.0.0.0", "--port", str(BACKEND_PORT), "--reload"],
         cwd=ROOT,
+        env={**os.environ, "GT_BACKEND_PORT": str(BACKEND_PORT), "GT_BACKEND_API": BACKEND_API},
     )
     processes.append(proc)
     return proc
@@ -32,10 +58,18 @@ def start_frontend():
         print("[*] Installing npm dependencies...")
         subprocess.run(["npm", "install"], cwd=ROOT, shell=True, check=True)
 
+    frontend_env = {
+        **os.environ,
+        "GT_BACKEND_PORT": str(BACKEND_PORT),
+        "GT_BACKEND_API": BACKEND_API,
+        "NEXT_PUBLIC_GT_BACKEND_PORT": str(BACKEND_PORT),
+        "NEXT_PUBLIC_GT_BACKEND_API": BACKEND_API,
+    }
     proc = subprocess.Popen(
         ["npm", "run", "dev", "--", "--port", str(FRONTEND_PORT)],
         cwd=ROOT,
         shell=True,
+        env=frontend_env,
     )
     processes.append(proc)
     return proc

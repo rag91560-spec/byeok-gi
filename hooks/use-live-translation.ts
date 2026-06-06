@@ -2,12 +2,12 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import { api } from "@/lib/api"
+import { useLocale } from "@/hooks/use-locale"
+import type { TranslationKey } from "@/lib/i18n"
 import type {
   CaptureSource,
-  CaptureRegion,
   LiveTranslationResult,
   LiveSettings,
-  OCRTextBlock,
   TranslatedBlock,
 } from "@/lib/types"
 
@@ -28,7 +28,36 @@ const DEFAULT_SETTINGS: LiveSettings = {
   useVision: false,
 }
 
+type LiveErrorState =
+  | { key: TranslationKey }
+  | { message: string }
+  | null
+
+function knownLiveErrorKey(message: string): TranslationKey | null {
+  const normalized = message.trim().toLowerCase()
+  if (!normalized) return null
+  if (normalized.includes("electron api not available")) return "electronApiUnavailable"
+  if (normalized.includes("source not found")) return "captureSourceNotFound"
+  if (normalized.includes("capture failed")) return "captureFailed"
+  if (normalized.includes("failed to list") || normalized.includes("list sources")) return "failedToListSources"
+  if (normalized.includes("no text detected")) return "noTextDetected"
+  if (normalized === "unknown error") return "unknownError"
+  return null
+}
+
+function liveErrorFromCode(errorCode: string | undefined): LiveErrorState {
+  if (errorCode === "captureSourceNotFound") return { key: "captureSourceNotFound" }
+  return null
+}
+
+function liveErrorFromMessage(message: string | undefined, fallbackKey: TranslationKey): LiveErrorState {
+  if (!message) return { key: fallbackKey }
+  const key = knownLiveErrorKey(message)
+  return key ? { key } : { message }
+}
+
 export function useLiveTranslation() {
+  const { t } = useLocale()
   const [settings, setSettings] = useState<LiveSettings>(() => {
     try {
       const saved = localStorage.getItem("gt-live-settings")
@@ -39,13 +68,16 @@ export function useLiveTranslation() {
   const [sources, setSources] = useState<CaptureSource[]>([])
   const [results, setResults] = useState<LiveTranslationResult[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [errorState, setErrorState] = useState<LiveErrorState>(null)
   const [capturing, setCapturing] = useState(false)
   const [lastCapture, setLastCapture] = useState<string | null>(null)
   const resultIdRef = useRef(0)
   const processingRef = useRef(false)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
+  const error = errorState
+    ? "key" in errorState ? t(errorState.key) : errorState.message
+    : ""
 
   // Persist settings
   useEffect(() => {
@@ -59,14 +91,16 @@ export function useLiveTranslation() {
   const refreshSources = useCallback(async () => {
     const electron = window.electronAPI
     if (!electron?.liveTranslation) {
-      setError("Electron API not available")
+      setErrorState({ key: "electronApiUnavailable" })
       return
     }
     try {
       const list = await electron.liveTranslation.listSources()
       setSources(list)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to list sources")
+      setErrorState(e instanceof Error
+        ? liveErrorFromMessage(e.message, "failedToListSources")
+        : { key: "failedToListSources" })
     }
   }, [])
 
@@ -76,14 +110,14 @@ export function useLiveTranslation() {
     if (!electron?.liveTranslation || !s.sourceId) return
 
     setLoading(true)
-    setError("")
+    setErrorState(null)
     try {
-      const { image, error: captureError } = await electron.liveTranslation.captureScreen({
+      const { image, error: captureError, errorCode: captureErrorCode } = await electron.liveTranslation.captureScreen({
         sourceId: s.sourceId,
         region: s.region,
       })
       if (captureError || !image) {
-        setError(captureError || "Capture failed")
+        setErrorState(liveErrorFromCode(captureErrorCode) ?? liveErrorFromMessage(captureError, "captureFailed"))
         return
       }
 
@@ -103,7 +137,7 @@ export function useLiveTranslation() {
           image, s.sourceLang, s.targetLang, s.provider, s.model
         )
         if (visionResult.error) {
-          setError(visionResult.error)
+          setErrorState({ message: visionResult.error })
           return
         }
         const id = String(++resultIdRef.current)
@@ -135,11 +169,11 @@ export function useLiveTranslation() {
         // OCR → get blocks with positions → translate each block
         const ocrResult = await api.live.ocr(image, s.language, s.ocrEngine)
         if (ocrResult.error) {
-          setError(ocrResult.error)
+          setErrorState({ message: ocrResult.error })
           return
         }
         if (!ocrResult.full_text.trim()) {
-          setError("No text detected")
+          setErrorState({ key: "noTextDetected" })
           return
         }
 
@@ -151,7 +185,7 @@ export function useLiveTranslation() {
           ocrResult.blocks, effectiveSourceLang, s.targetLang, s.provider, s.model, detectedLang
         )
         if (blockTranslation.error) {
-          setError(blockTranslation.error)
+          setErrorState({ message: blockTranslation.error })
           return
         }
 
@@ -173,7 +207,7 @@ export function useLiveTranslation() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error")
+      setErrorState(e instanceof Error ? { message: e.message } : { key: "unknownError" })
     } finally {
       setLoading(false)
     }

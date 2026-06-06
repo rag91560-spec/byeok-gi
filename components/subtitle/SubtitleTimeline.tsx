@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react"
+import { useLocale } from "@/hooks/use-locale"
 import type { SubtitleSegment } from "@/lib/types"
 import { api } from "@/lib/api"
-import { MinusIcon, PlusIcon, SearchIcon, Scissors } from "lucide-react"
+import { MinusIcon, PlusIcon, Scissors } from "lucide-react"
 
 interface SubtitleTimelineProps {
   segments: SubtitleSegment[]
@@ -131,7 +132,6 @@ export function SubtitleTimeline({
   duration,
   currentTime,
   selectedSegmentId,
-  subtitleId,
   onSeek,
   onSegmentSelect,
   onSegmentTimingChange,
@@ -141,6 +141,7 @@ export function SubtitleTimeline({
   mediaId,
   mediaType,
 }: SubtitleTimelineProps) {
+  const { t } = useLocale()
   const [zoom, setZoom] = useState(DEFAULT_ZOOM) // px per second
   const [waveformPeaks, setWaveformPeaks] = useState<number[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -551,10 +552,10 @@ export function SubtitleTimeline({
               ? "hover:bg-accent hover:text-foreground"
               : "opacity-30 cursor-not-allowed"
           }`}
-          title="플레이헤드에서 분할 (B)"
+          title={t("splitAtPlayheadShortcut")}
         >
           <Scissors className="size-3" />
-          <span className="text-[10px]">분할</span>
+          <span className="text-[10px]">{t("splitSegment")}</span>
         </button>
 
         <div className="w-px h-3.5 bg-muted mx-1" />
@@ -570,16 +571,16 @@ export function SubtitleTimeline({
               ? "hover:bg-destructive/10 hover:text-destructive"
               : "opacity-30 cursor-not-allowed"
           }`}
-          title="선택 세그먼트 삭제 (Del)"
+          title={t("deleteSelectedSegmentShortcut")}
         >
-          삭제
+          {t("deleteSegment")}
         </button>
 
         <div className="flex-1" />
 
         {/* Shortcut hints */}
         <span className="text-[10px] text-muted-foreground/50 hidden lg:inline">
-          Dbl-click: 추가 | B: 분할 | Del: 삭제 | I/O: 시작/끝점
+          {t("timelineShortcutHint")}
         </span>
 
         <div className="w-px h-3.5 bg-muted mx-1" />
@@ -708,7 +709,7 @@ export function SubtitleTimeline({
                       )}
                       {!original && !translated && (
                         <div className="text-[10px] text-muted-foreground/40 truncate leading-tight italic">
-                          empty
+                          {t("empty")}
                         </div>
                       )}
                     </div>
@@ -772,7 +773,7 @@ export function SubtitleTimeline({
                   setContextMenu(null)
                 }}
               >
-                <span>플레이헤드에서 분할</span>
+                <span>{t("splitAtPlayhead")}</span>
                 <kbd className="text-[10px] text-muted-foreground bg-muted px-1 rounded">B</kbd>
               </button>
               <button
@@ -784,7 +785,7 @@ export function SubtitleTimeline({
                   setContextMenu(null)
                 }}
               >
-                <span>삭제</span>
+                <span>{t("deleteSegment")}</span>
                 <kbd className="text-[10px] text-muted-foreground bg-muted px-1 rounded">Del</kbd>
               </button>
             </>
@@ -807,7 +808,7 @@ export function SubtitleTimeline({
                 setContextMenu(null)
               }}
             >
-              <span>여기에 자막 추가</span>
+              <span>{t("addSubtitleHere")}</span>
               <kbd className="text-[10px] text-muted-foreground bg-muted px-1 rounded">Dbl-click</kbd>
             </button>
           )}

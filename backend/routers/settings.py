@@ -1,6 +1,7 @@
 """Settings GET/PUT endpoints + License status + Crash log."""
 
 import os
+import re
 
 import httpx
 from fastapi import APIRouter
@@ -18,6 +19,16 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 _data_dir = os.environ.get("GT_DATA_DIR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
 )
+
+_SECRET_FIELD_RE = re.compile(
+    r"(?i)(\"?(?:api[_-]?keys?|license[_-]?key|token|secret|password|authorization|x-api-key)\"?\s*[:=]\s*)([\"']?)[^\"',\s}]+"
+)
+_BEARER_RE = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+")
+
+
+def _redact_sensitive(text: str) -> str:
+    text = _SECRET_FIELD_RE.sub(r"\1\2[REDACTED]", text)
+    return _BEARER_RE.sub(r"\1[REDACTED]", text)
 
 
 class TestKeyRequest(BaseModel):
@@ -119,7 +130,7 @@ async def get_crash_log():
             lines = f.readlines()
         # Return last 200 lines (most recent crashes)
         tail = lines[-200:] if len(lines) > 200 else lines
-        return PlainTextResponse("".join(tail))
+        return PlainTextResponse(_redact_sensitive("".join(tail)))
     except Exception:
         return PlainTextResponse("")
 

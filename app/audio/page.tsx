@@ -10,20 +10,36 @@ import {
   PauseIcon,
   Volume2Icon,
   PlusIcon,
+  UploadIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLocale } from "@/hooks/use-locale"
+import { useOsSelection } from "@/hooks/use-os-selection"
+import { MEDIA_DND_MIME, hasExternalFiles } from "@/hooks/use-media-dnd"
 import { api } from "@/lib/api"
 import type { AudioItem, MediaCategory, MediaFile } from "@/lib/types"
 import { cn, appConfirm } from "@/lib/utils"
+import {
+  AUDIO_DROP_EXTENSIONS,
+  emptyDropImportSummary,
+  formatDropImportSummary,
+  getDroppedFilePath,
+  getPathExtension,
+  getPathTitle,
+  isDuplicateImportError,
+  isLikelyFolderDrop,
+} from "@/lib/external-drop-import"
 import { MediaCard } from "@/components/media-grid/MediaCard"
-import { MediaToolbar } from "@/components/media-grid/MediaToolbar"
+import { LibraryEmptyState } from "@/components/media-grid/LibraryEmptyState"
+import { LibrarySurfaceHeader } from "@/components/media-grid/LibrarySurfaceHeader"
 import { SelectionBar } from "@/components/media-grid/SelectionBar"
 import { BulkTranslateModal } from "@/components/media-grid/BulkTranslateModal"
 import { CategoryGlossaryEditor } from "@/components/media-grid/CategoryGlossaryEditor"
 import { AudioPlayerBar } from "@/components/media-grid/AudioPlayerBar"
 import { AudioFullscreenPlayer } from "@/components/media-grid/AudioFullscreenPlayer"
 import { FolderExplorer } from "@/components/media-grid/FolderExplorer"
+import { FolderNameDialog, useFolderNameDialog } from "@/components/media-grid/FolderNameDialog"
+import { FolderContextMenu, type FolderContextMenuTarget } from "@/components/media-grid/FolderContextMenu"
 import { SubtitleWorkspace } from "@/components/subtitle/SubtitleWorkspace"
 
 type Tab = "my" | "game"
@@ -58,16 +74,21 @@ function AudioPageContent() {
   const [glossaryEditorCategoryId, setGlossaryEditorCategoryId] = useState<number | null>(null)
   const [search, setSearch] = useState("")
   const [activeTrack, setActiveTrack] = useState<AudioItem | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [fullscreenTrack, setFullscreenTrack] = useState<AudioItem | null>(null)
   const [subtitleAudio, setSubtitleAudio] = useState<AudioItem | null>(null)
   const [thumbnailTargetId, setThumbnailTargetId] = useState<number | null>(null)
+  const [isDropOver, setIsDropOver] = useState(false)
+  const [dropImporting, setDropImporting] = useState(false)
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuTarget | null>(null)
+  const { folderNameDialog, requestFolderName, closeFolderNameDialog } = useFolderNameDialog()
   const thumbnailInputRef = useRef<HTMLInputElement>(null)
+  const externalDropCounterRef = useRef(0)
 
   // --- Game Audio state ---
   const [games, setGames] = useState<GameInfo[]>([])
   const [gameLoading, setGameLoading] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null)
+  const [gameSearch, setGameSearch] = useState("")
   const [audioFiles, setAudioFiles] = useState<MediaFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [playingFile, setPlayingFile] = useState<string | null>(null)
@@ -132,13 +153,29 @@ function AudioPageContent() {
     const s = search.toLowerCase()
     return audioItems.filter((a) => a.title.toLowerCase().includes(s))
   }, [audioItems, search])
+  const filteredGames = useMemo(() => {
+    if (!gameSearch) return games
+    const s = gameSearch.toLowerCase()
+    return games.filter((game) => game.title.toLowerCase().includes(s))
+  }, [gameSearch, games])
+  const visibleGameAudioFiles = useMemo(() => {
+    if (!gameSearch) return audioFiles
+    const s = gameSearch.toLowerCase()
+    return audioFiles.filter((file) => file.name.toLowerCase().includes(s))
+  }, [audioFiles, gameSearch])
+  const visibleAudioIds = useMemo(() => {
+    const visible = search
+      ? filtered
+      : audioItems.filter((a) => (a.category_id ?? null) === currentFolderId)
+    return visible.map((a) => a.id)
+  }, [audioItems, currentFolderId, filtered, search])
+  const selection = useOsSelection(visibleAudioIds)
 
   const handleDelete = async (id: number) => {
-    if (!await appConfirm(t("confirmDeleteAudio"))) return
+    if (!await appConfirm(t("confirmRemoveAudioFromLibrary").replace("{count}", "1"))) return
     try {
-      await api.audio.delete(id)
+      await api.audio.removeFromLibrary(id)
       setAudioItems((prev) => prev.filter((a) => a.id !== id))
-      setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next })
       if (activeTrack?.id === id) setActiveTrack(null)
     } catch {}
   }
@@ -159,7 +196,7 @@ function AudioPageContent() {
         preserveStructure: true,
       })
       if (result.created_items.length > 0) {
-        setAudioItems((prev) => [...prev, ...result.created_items])
+        setAudioItems((prev) => [...result.created_items, ...prev])
       }
       if (result.created_categories.length > 0) {
         const cats = await api.categories.list("audio")
@@ -176,6 +213,108 @@ function AudioPageContent() {
     }
   }
 
+  const isExternalImportDrag = useCallback((event: React.DragEvent) => {
+    return hasExternalFiles(event) && !Array.from(event.dataTransfer.types).includes(MEDIA_DND_MIME)
+  }, [])
+
+  const handleExternalDragEnter = useCallback((event: React.DragEvent) => {
+    if (!isExternalImportDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    externalDropCounterRef.current += 1
+    setIsDropOver(true)
+  }, [isExternalImportDrag])
+
+  const handleExternalDragLeave = useCallback((event: React.DragEvent) => {
+    if (!isExternalImportDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    externalDropCounterRef.current -= 1
+    if (externalDropCounterRef.current <= 0) {
+      externalDropCounterRef.current = 0
+      setIsDropOver(false)
+    }
+  }, [isExternalImportDrag])
+
+  const handleExternalDragOver = useCallback((event: React.DragEvent) => {
+    if (!isExternalImportDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = "copy"
+  }, [isExternalImportDrag])
+
+  const handleExternalDrop = useCallback(async (event: React.DragEvent) => {
+    if (!isExternalImportDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDropOver(false)
+    externalDropCounterRef.current = 0
+
+    const dropped = Array.from(event.dataTransfer.files)
+    if (dropped.length === 0) return
+
+    const summary = emptyDropImportSummary()
+    const created: AudioItem[] = []
+    let shouldRefreshCategories = false
+    setDropImporting(true)
+
+    for (const file of dropped) {
+      const path = getDroppedFilePath(file)
+      const label = path || file.name
+      const ext = getPathExtension(label)
+
+      if (isLikelyFolderDrop(file, path)) {
+        try {
+          const result = await api.audio.scanFolder(path, {
+            parentCategoryId: currentFolderId,
+            preserveStructure: true,
+          })
+          created.push(...result.created_items)
+          summary.success += result.created_items.length
+          if (result.created_categories.length > 0) shouldRefreshCategories = true
+          if (result.total === 0) summary.unsupported += 1
+        } catch (error) {
+          if (isDuplicateImportError(error)) summary.duplicates += 1
+          else summary.failed += 1
+        }
+        continue
+      }
+
+      if (!AUDIO_DROP_EXTENSIONS.has(ext) && !file.type.startsWith("audio/")) {
+        summary.unsupported += 1
+        continue
+      }
+
+      try {
+        let item = path
+          ? await api.audio.add({
+              title: getPathTitle(path),
+              type: "local",
+              source: path,
+              category_id: currentFolderId,
+            })
+          : await api.audio.addFile(file)
+        if (!path && currentFolderId !== null) {
+          item = await api.audio.update(item.id, { category_id: currentFolderId })
+        }
+        created.push(item)
+        summary.success += 1
+      } catch (error) {
+        if (isDuplicateImportError(error)) summary.duplicates += 1
+        else summary.failed += 1
+      }
+    }
+
+    if (created.length > 0) {
+      setAudioItems((prev) => [...created, ...prev])
+    }
+    if (shouldRefreshCategories) {
+      api.categories.list("audio").then(setCategories).catch(() => {})
+    }
+    setDropImporting(false)
+    alert(formatDropImportSummary(t, summary))
+  }, [currentFolderId, isExternalImportDrag, t])
+
   const handleMoveToCategory = async (audioId: number, catId: number | null) => {
     try {
       const updated = await api.audio.update(audioId, { category_id: catId })
@@ -183,53 +322,75 @@ function AudioPageContent() {
     } catch {}
   }
 
-  const handleSelect = (id: number, checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  }
-
   const handleBulkMove = async (categoryId: number | null) => {
-    const ids = Array.from(selectedIds)
+    const ids = selection.getValidSelectedIds()
     if (ids.length === 0) return
     try {
       await api.audio.bulkMove(ids, categoryId)
       setAudioItems((prev) => prev.map((a) =>
         ids.includes(a.id) ? { ...a, category_id: categoryId } : a
       ))
-      setSelectedIds(new Set())
+      selection.clearSelection()
       api.categories.list("audio").then(setCategories).catch(() => {})
     } catch {}
   }
 
   const handleBulkDelete = async () => {
-    const ids = Array.from(selectedIds)
+    const ids = selection.getValidSelectedIds()
     if (ids.length === 0) return
-    if (!await appConfirm(t("confirmBulkDeleteAudio").replace("{count}", String(ids.length)))) return
+    if (!await appConfirm(t("confirmRemoveAudioFromLibrary").replace("{count}", String(ids.length)))) return
+    const confirmedIds = selection.getValidSelectedIds()
+    if (confirmedIds.length === 0) return
     try {
-      await api.audio.bulkDelete(ids)
-      setAudioItems((prev) => prev.filter((a) => !ids.includes(a.id)))
-      setSelectedIds(new Set())
+      await api.audio.removeFromLibrary(confirmedIds)
+      setAudioItems((prev) => prev.filter((a) => !confirmedIds.includes(a.id)))
+      selection.clearSelection()
     } catch {}
   }
 
-  const handleDndMoveToCategory = async (itemId: number, categoryId: number | null) => {
-    await handleMoveToCategory(itemId, categoryId)
+  const handleDndMoveToCategory = async (payload: { ids: number[] }, categoryId: number | null) => {
+    const ids = payload.ids.filter((id) => audioItems.some((item) => item.id === id && (item.category_id ?? null) !== categoryId))
+    if (ids.length === 0) return
+    await api.audio.bulkMove(ids, categoryId)
+    setAudioItems((prev) => prev.map((a) =>
+      ids.includes(a.id) ? { ...a, category_id: categoryId } : a
+    ))
+    selection.clearSelection()
     handleCategoriesRefresh()
   }
 
-  const handleMergeDrop = async (targetId: number, draggedId: number) => {
-    const name = prompt(t("folderName") || "폴더 이름", t("newFolder") || "새 폴더")
+  const handleMergeDrop = async (targetId: number, payload: { ids: number[] }) => {
+    const ids = Array.from(new Set([...payload.ids, targetId])).filter((id) => audioItems.some((item) => item.id === id))
+    if (ids.length < 2) return
+    const name = await requestFolderName(t("folderNameForSelected").replace("{count}", String(ids.length)), t("newFolder") || "새 폴더")
     if (!name) return
+    const confirmedIds = ids.filter((id) => audioItems.some((item) => item.id === id))
+    if (confirmedIds.length < 2) return
     try {
       const cat = await api.categories.create({ name, media_type: "audio", parent_id: currentFolderId })
-      await api.audio.bulkMove([draggedId, targetId], cat.id)
+      await api.audio.bulkMove(confirmedIds, cat.id)
       setAudioItems((prev) => prev.map((a) =>
-        [draggedId, targetId].includes(a.id) ? { ...a, category_id: cat.id } : a
+        confirmedIds.includes(a.id) ? { ...a, category_id: cat.id } : a
       ))
+      selection.clearSelection()
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleCreateFolderFromSelection = async () => {
+    const ids = selection.getValidSelectedIds()
+    if (ids.length === 0) return
+    const name = await requestFolderName(t("folderName") || "폴더 이름", t("newFolder") || "새 폴더")
+    if (!name) return
+    const confirmedIds = selection.getValidSelectedIds()
+    if (confirmedIds.length === 0) return
+    try {
+      const cat = await api.categories.create({ name, media_type: "audio", parent_id: currentFolderId })
+      await api.audio.bulkMove(confirmedIds, cat.id)
+      setAudioItems((prev) => prev.map((a) =>
+        confirmedIds.includes(a.id) ? { ...a, category_id: cat.id } : a
+      ))
+      selection.clearSelection()
       handleCategoriesRefresh()
     } catch {}
   }
@@ -249,27 +410,46 @@ function AudioPageContent() {
     }
   }
 
-  const handleFolderContextMenu = async (folderId: number) => {
-    // Simple: rename / delete via confirm prompts
+  const openFolderContextMenu = (folderId: number, event: React.MouseEvent) => {
     const cat = categories.find((c) => c.id === folderId)
     if (!cat) return
-    const action = prompt(t("folderActionPrompt").replace("{name}", cat.name), "1")
-    if (action === "1") {
-      const name = prompt(t("newName"), cat.name)
-      if (name && name.trim() && name !== cat.name) {
-        try {
-          await api.categories.update(folderId, { name: name.trim() })
-          handleCategoriesRefresh()
-        } catch {}
-      }
-    } else if (action === "2") {
-      if (!(await appConfirm(t("confirmDeleteCategory")))) return
-      try {
-        await api.categories.delete(folderId)
-        if (currentFolderId === folderId) navigateToFolder(cat.parent_id ?? null)
-        handleCategoriesRefresh()
-      } catch {}
-    }
+    setFolderContextMenu({
+      id: cat.id,
+      name: cat.name,
+      x: event.clientX,
+      y: event.clientY,
+      itemCount: audioItems.filter((item) => item.category_id === folderId).length,
+      childFolderCount: categories.filter((child) => child.parent_id === folderId).length,
+    })
+  }
+
+  const handleRenameFolder = async (target: FolderContextMenuTarget) => {
+    setFolderContextMenu(null)
+    const name = await requestFolderName(t("renameFolder"), target.name)
+    if (!name || name.trim() === target.name) return
+    try {
+      await api.categories.update(target.id, { name: name.trim() })
+      handleCategoriesRefresh()
+    } catch {}
+  }
+
+  const handleRemoveFolder = async (target: FolderContextMenuTarget) => {
+    setFolderContextMenu(null)
+    const cat = categories.find((c) => c.id === target.id)
+    const parentId = cat?.parent_id ?? null
+    const message = t("removeFolderConfirm")
+      .replace("{name}", target.name)
+      .replace("{items}", String(target.itemCount))
+      .replace("{folders}", String(target.childFolderCount))
+    if (!(await appConfirm(message))) return
+    try {
+      await api.categories.delete(target.id)
+      setAudioItems((prev) => prev.map((item) =>
+        item.category_id === target.id ? { ...item, category_id: parentId } : item
+      ))
+      if (currentFolderId === target.id) navigateToFolder(parentId)
+      handleCategoriesRefresh()
+    } catch {}
   }
 
   const handleChangeThumbnail = (id: number) => {
@@ -313,97 +493,147 @@ function AudioPageContent() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  const searchValue = tab === "my" ? search : gameSearch
+  const setSearchValue = tab === "my" ? setSearch : setGameSearch
+  const headerMeta = tab === "my"
+    ? `${audioItems.length} ${t("audio")}`
+    : `${games.length} ${t("gameAudio")}`
+  const sourceControls = (
+    <div className="flex shrink-0 gap-1 rounded-lg bg-overlay-4 p-1">
+      <button
+        type="button"
+        onClick={() => setTab("my")}
+        className={cn(
+          "flex h-9 items-center gap-1.5 rounded-md px-4 text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+          tab === "my"
+            ? "bg-surface text-text-primary font-medium shadow-sm"
+            : "text-text-secondary hover:text-text-primary"
+        )}
+      >
+        <MusicIcon className="size-4" />
+        {t("myAudio")}
+      </button>
+      <button
+        type="button"
+        onClick={() => setTab("game")}
+        className={cn(
+          "flex h-9 items-center gap-1.5 rounded-md px-4 text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+          tab === "game"
+            ? "bg-surface text-text-primary font-medium shadow-sm"
+            : "text-text-secondary hover:text-text-primary"
+        )}
+      >
+        <Gamepad2Icon className="size-4" />
+        {t("gameAudio")}
+      </button>
+    </div>
+  )
+  const header = (
+    <LibrarySurfaceHeader
+      className="mb-5"
+      icon={tab === "my" ? <MusicIcon className="size-6" /> : <Gamepad2Icon className="size-6" />}
+      title={t("audio")}
+      meta={headerMeta}
+      searchValue={searchValue}
+      onSearchChange={setSearchValue}
+      searchPlaceholder={t("searchAudio")}
+      clearSearchLabel={t("clearSearch")}
+      onClearSearch={searchValue ? () => setSearchValue("") : undefined}
+      filterSlot={sourceControls}
+      secondaryActions={activeTrack && activeTrack.type === "local" ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setSubtitleAudio(activeTrack)}
+          title={t("subtitlePipeline")}
+        >
+          {t("subtitlePipeline")}
+        </Button>
+      ) : null}
+      primaryAction={tab === "my" ? (
+        <Button onClick={handleAddFolder} size="lg" disabled={scanning}>
+          {scanning ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}
+          {t("addAudio")}
+        </Button>
+      ) : null}
+    />
+  )
+
   const loading = tab === "my" ? myLoading : gameLoading
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2Icon className="size-6 animate-spin text-text-tertiary" />
+      <div className="p-5 md:p-6 max-w-6xl mx-auto relative">
+        {header}
+        <div className="flex items-center justify-center py-20">
+          <Loader2Icon className="size-6 animate-spin text-text-tertiary" />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 p-3 border-b border-border-subtle">
-        <div className="flex gap-1 p-1 rounded-lg bg-overlay-4">
-          <button
-            onClick={() => setTab("my")}
-            className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm rounded-md transition-all",
-              tab === "my"
-                ? "bg-surface text-text-primary font-medium shadow-sm"
-                : "text-text-secondary hover:text-text-primary"
-            )}
-          >
-            <MusicIcon className="size-4" />
-            {t("myAudio")}
-          </button>
-          <button
-            onClick={() => setTab("game")}
-            className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm rounded-md transition-all",
-              tab === "game"
-                ? "bg-surface text-text-primary font-medium shadow-sm"
-                : "text-text-secondary hover:text-text-primary"
-            )}
-          >
-            <Gamepad2Icon className="size-4" />
-            {t("gameAudio")}
-          </button>
-        </div>
-      </div>
+    <div className="p-5 md:p-6 max-w-6xl mx-auto relative">
+      {header}
 
       {/* Tab content */}
       {tab === "my" ? (
-        <div className="flex-1 flex flex-col min-h-0 p-4 gap-3">
-          {/* Toolbar row */}
-          <div className="flex items-center gap-3">
-            <MediaToolbar
-              search={search}
-              onSearchChange={setSearch}
-              onAdd={handleAddFolder}
-              addDisabled={scanning}
-              mediaType="audio"
+        <div
+          data-testid="audio-drop-surface"
+          className="relative"
+          tabIndex={0}
+          onMouseDown={selection.handleBlankMouseDown}
+          onKeyDown={selection.handleKeyDown}
+          onDragEnter={handleExternalDragEnter}
+          onDragLeave={handleExternalDragLeave}
+          onDragOver={handleExternalDragOver}
+          onDrop={handleExternalDrop}
+        >
+          {(isDropOver || dropImporting) && (
+            <div className="absolute inset-0 z-50 bg-accent/10 backdrop-blur-sm border-2 border-dashed border-accent rounded-xl flex flex-col items-center justify-center gap-3 pointer-events-none">
+              {dropImporting ? <Loader2Icon className="size-10 animate-spin text-accent" /> : <UploadIcon className="size-10 text-accent" />}
+              <p className="text-base font-semibold text-accent">{t("dropMediaToImport")}</p>
+              <p className="text-sm text-text-secondary">{t("dropMediaHint")}</p>
+            </div>
+          )}
+
+          {folderNameDialog && (
+            <FolderNameDialog request={folderNameDialog} onClose={closeFolderNameDialog} />
+          )}
+          {folderContextMenu && (
+            <FolderContextMenu
+              target={folderContextMenu}
+              onClose={() => setFolderContextMenu(null)}
+              onRename={handleRenameFolder}
+              onRemove={handleRemoveFolder}
             />
-            {activeTrack && activeTrack.type === "local" && (
-              <button
-                onClick={() => setSubtitleAudio(activeTrack)}
-                className="ml-2 px-3 py-1.5 text-xs border rounded-md hover:bg-accent transition-colors shrink-0"
-                title={t("subtitlePipeline")}
-              >
-                {t("subtitlePipeline")}
-              </button>
-            )}
-          </div>
+          )}
 
           {/* Selection bar */}
-          {selectedIds.size > 0 && (
+          {selection.selectedCount > 0 && (
             <SelectionBar
-              selectedCount={selectedIds.size}
+              selectedCount={selection.selectedCount}
               categories={categories}
               onBulkMove={handleBulkMove}
               onBulkDelete={handleBulkDelete}
               onBulkTranslate={() => setBulkTranslateOpen(true)}
-              onDeselectAll={() => setSelectedIds(new Set())}
+              onCreateFolderFromSelection={handleCreateFolderFromSelection}
+              onDeselectAll={selection.clearSelection}
+              removeActionKind="remove-from-library"
             />
           )}
 
           <div
-            className="flex-1 flex flex-col min-h-0"
+            className="min-h-0"
             style={activeTrack ? { paddingBottom: 80 } : undefined}
           >
             {search ? (
               // Search view: flat list across all folders
-              <div className="flex-1 overflow-y-auto min-h-0">
+              <div onMouseDown={selection.handleBlankMouseDown}>
                 {filtered.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-                    <MusicIcon className="size-12 text-text-tertiary opacity-30" />
-                    <p className="text-sm text-text-secondary">{t("noResults") || "No results"}</p>
-                  </div>
+                  <LibraryEmptyState icon={<MusicIcon />} title={t("noResults") || "No results"} />
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  <div className="explorer-tile-grid" onMouseDown={selection.handleBlankMouseDown}>
                     {filtered.map((item) => (
                       <MediaCard
                         key={item.id}
@@ -411,33 +641,35 @@ function AudioPageContent() {
                         title={item.title}
                         thumbnail={item.thumbnail || undefined}
                         mediaType="audio"
+                        layout="panel"
                         duration={item.duration}
                         size={item.size}
                         categoryId={item.category_id}
                         categories={categories}
                         isActive={activeTrack?.id === item.id}
                         selectable
-                        selected={selectedIds.has(item.id)}
-                        onSelect={(checked) => handleSelect(item.id, checked)}
+                        selected={selection.selectedIds.has(item.id)}
+                        onSelect={(checked) => selection.handleCheckboxSelect(item.id, checked)}
+                        onSelectionClick={(event) => selection.handleItemClick(item.id, event)}
+                        getDragIds={selection.getDragIds}
+                        sourceSurface="audio"
                         onClick={() => setActiveTrack(item)}
                         onDelete={() => handleDelete(item.id)}
                         onChangeThumbnail={() => handleChangeThumbnail(item.id)}
                         onMoveToCategory={(catId) => handleMoveToCategory(item.id, catId)}
-                        onMergeDrop={(draggedId) => handleMergeDrop(item.id, draggedId)}
+                        onMergeDrop={(payload) => handleMergeDrop(item.id, payload)}
                       />
                     ))}
                   </div>
                 )}
               </div>
             ) : audioItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-                <MusicIcon className="size-12 text-text-tertiary opacity-30" />
-                <p className="text-sm text-text-secondary">{t("noAudioFiles") || "No audio"}</p>
+              <LibraryEmptyState icon={<MusicIcon />} title={t("noAudioFiles") || "No audio"}>
                 <Button variant="secondary" size="sm" onClick={handleAddFolder} disabled={scanning}>
                   {scanning ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}
                   {t("addFirstAudio")}
                 </Button>
-              </div>
+              </LibraryEmptyState>
             ) : (
               <FolderExplorer<AudioItem>
                 categories={categories}
@@ -445,27 +677,34 @@ function AudioPageContent() {
                 currentFolderId={currentFolderId}
                 onNavigate={navigateToFolder}
                 onCreateFolder={handleCreateFolder}
-                onDropItemToFolder={handleDndMoveToCategory}
-                onFolderContextMenu={(id) => handleFolderContextMenu(id)}
+                onDropItemsToFolder={handleDndMoveToCategory}
+                acceptDropType="audio"
+                onFolderContextMenu={openFolderContextMenu}
+                folderPreviewAspect="panel"
+                onBlankMouseDown={selection.handleBlankMouseDown}
                 renderItem={(item) => (
                   <MediaCard
                     id={item.id}
                     title={item.title}
                     thumbnail={item.thumbnail || undefined}
                     mediaType="audio"
+                    layout="panel"
                     duration={item.duration}
                     size={item.size}
                     categoryId={item.category_id}
                     categories={categories}
                     isActive={activeTrack?.id === item.id}
                     selectable
-                    selected={selectedIds.has(item.id)}
-                    onSelect={(checked) => handleSelect(item.id, checked)}
+                    selected={selection.selectedIds.has(item.id)}
+                    onSelect={(checked) => selection.handleCheckboxSelect(item.id, checked)}
+                    onSelectionClick={(event) => selection.handleItemClick(item.id, event)}
+                    getDragIds={selection.getDragIds}
+                    sourceSurface="audio"
                     onClick={() => setActiveTrack(item)}
                     onDelete={() => handleDelete(item.id)}
                     onChangeThumbnail={() => handleChangeThumbnail(item.id)}
                     onMoveToCategory={(catId) => handleMoveToCategory(item.id, catId)}
-                    onMergeDrop={(draggedId) => handleMergeDrop(item.id, draggedId)}
+                    onMergeDrop={(payload) => handleMergeDrop(item.id, payload)}
                   />
                 )}
               />
@@ -492,9 +731,14 @@ function AudioPageContent() {
                   <MusicIcon className="size-10 text-text-tertiary" />
                   <p className="text-sm text-text-secondary">{t("noAudioGames")}</p>
                 </div>
+              ) : filteredGames.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 px-4 text-center">
+                  <MusicIcon className="size-10 text-text-tertiary" />
+                  <p className="text-sm text-text-secondary">{t("noResults")}</p>
+                </div>
               ) : (
                 <div className="p-1.5 space-y-0.5">
-                  {games.map((game) => (
+                  {filteredGames.map((game) => (
                     <div
                       key={game.id}
                       className={cn(
@@ -530,12 +774,17 @@ function AudioPageContent() {
                 <Volume2Icon className="size-16" />
                 <p className="text-sm">{t("noAudioFiles")}</p>
               </div>
+            ) : visibleGameAudioFiles.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-text-tertiary">
+                <MusicIcon className="size-16" />
+                <p className="text-sm">{t("noResults")}</p>
+              </div>
             ) : (
               <div className="space-y-0.5 max-w-2xl">
                 <div className="text-xs text-text-tertiary mb-3">
-                  {audioFiles.length} files
+                  {visibleGameAudioFiles.length} files
                 </div>
-                {audioFiles.map((file) => {
+                {visibleGameAudioFiles.map((file) => {
                   const isActive = playingFile === file.path
                   return (
                     <div
@@ -607,9 +856,9 @@ function AudioPageContent() {
       {/* Bulk translate modal */}
       {bulkTranslateOpen && (
         <BulkTranslateModal
-          audioIds={Array.from(selectedIds)}
+          audioIds={selection.getValidSelectedIds()}
           defaultCategoryId={(() => {
-            const ids = Array.from(selectedIds)
+            const ids = selection.getValidSelectedIds()
             const cats = new Set(
               ids
                 .map((id) => audioItems.find((a) => a.id === id)?.category_id ?? null)
@@ -623,7 +872,7 @@ function AudioPageContent() {
               const map = new Map(updated.map((u) => [u.id, u]))
               return prev.map((a) => map.get(a.id) || a)
             })
-            setSelectedIds(new Set())
+            selection.clearSelection()
           }}
         />
       )}

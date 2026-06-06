@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { useLocale } from "@/hooks/use-locale"
 import { useSubtitles, useSubtitleSegments, useSubtitleJob } from "@/hooks/use-subtitle-job"
 import { api } from "@/lib/api"
-import type { SubtitleSet, SubtitleSegment, SubtitleStyleOptions, SubtitleGlossaryEntry } from "@/lib/types"
+import type { SubtitleStyleOptions, SubtitleGlossaryEntry } from "@/lib/types"
 import { AI_PROVIDERS, getProvider } from "@/lib/providers"
 import { ChipButton } from "@/components/game-detail/ChipButton"
 import { SubtitleOverlay } from "./SubtitleOverlay"
@@ -62,9 +62,9 @@ export function SubtitleWorkspace({
   const { t } = useLocale()
   const { subtitles, loading: subsLoading, refresh: refreshSubtitles } = useSubtitles(mediaType, mediaId)
   const [activeSubtitleId, setActiveSubtitleId] = useState<number | null>(null)
-  const { segments, subtitle, loading, refresh: refreshSegments, setSegments } = useSubtitleSegments(activeSubtitleId)
-  const { jobProgress, startTranslate, cancelJob, reset: resetJob } = useSubtitleJob()
-  const { jobProgress: hardsubProgress, startHardsub, cancelJob: cancelHardsub, reset: resetHardsub } = useSubtitleJob()
+  const { segments, subtitle, refresh: refreshSegments, setSegments } = useSubtitleSegments(activeSubtitleId)
+  const { jobProgress, startTranslate, cancelJob } = useSubtitleJob()
+  const { jobProgress: hardsubProgress, startHardsub, cancelJob: cancelHardsub } = useSubtitleJob()
   const [currentStep, setCurrentStep] = useState<PipelineStep>("extract")
   const [currentTime, setCurrentTime] = useState(0)
   const [displayMode, setDisplayMode] = useState<"original" | "translated" | "both">("both")
@@ -225,7 +225,7 @@ export function SubtitleWorkspace({
       const r = await api.subtitle.getGlossary(activeSubtitleId)
       setGlossary(r.entries)
     } catch (e) {
-      setTranslateError(e instanceof Error ? e.message : "분석 실패")
+      setTranslateError(e instanceof Error ? e.message : t("analyzeFailed"))
     } finally {
       setAnalyzing(false)
     }
@@ -461,6 +461,17 @@ export function SubtitleWorkspace({
     translate: t("stepTranslate"),
     export: t("stepExport"),
   }
+  const subtitleCategoryLabels: Record<SubtitleGlossaryEntry["category"], string> = {
+    general: t("subtitleCategoryGeneral"),
+    character: t("subtitleCategoryCharacter"),
+    place: t("subtitleCategoryPlace"),
+    term: t("subtitleCategoryTerm"),
+  }
+  const positionPresetLabels: Record<(typeof POSITION_PRESETS)[number]["label"], string> = {
+    Bottom: t("subtitlePositionBottom"),
+    Top: t("subtitlePositionTop"),
+    Center: t("subtitlePositionCenter"),
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -624,7 +635,7 @@ export function SubtitleWorkspace({
           {/* Subtitle selector — always visible when multiple subtitles exist */}
           {subtitles.length > 1 && (currentStep === "extract" || currentStep === "stt") && (
             <div className="px-3 py-2 border-b flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">자막:</span>
+              <span className="text-xs text-muted-foreground">{t("subtitleSelectorLabel")}:</span>
               <select
                 value={activeSubtitleId ?? ""}
                 onChange={(e) => setActiveSubtitleId(Number(e.target.value))}
@@ -748,15 +759,15 @@ export function SubtitleWorkspace({
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
-                      <h4 className="text-sm font-medium">자막 스타일</h4>
+                      <h4 className="text-sm font-medium">{t("subtitleStyle")}</h4>
                     </div>
 
                     {/* Text section */}
                     <div className="space-y-2">
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">텍스트</span>
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t("subtitleStyleText")}</span>
                       {/* Font size */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-16">글꼴 크기</span>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">{t("subtitleFontSize")}</span>
                         <input
                           type="range"
                           min={16}
@@ -769,7 +780,7 @@ export function SubtitleWorkspace({
                       </div>
                       {/* Text color */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-16">색상</span>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">{t("subtitleColor")}</span>
                         <input
                           type="color"
                           value={assToHex(subtitleStyle.primary_color)}
@@ -784,10 +795,10 @@ export function SubtitleWorkspace({
 
                     {/* Outline section */}
                     <div className="space-y-2">
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">외곽선</span>
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t("subtitleOutline")}</span>
                       {/* Outline width */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-16">두께</span>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">{t("subtitleOutlineWidth")}</span>
                         <input
                           type="range"
                           min={0}
@@ -800,7 +811,7 @@ export function SubtitleWorkspace({
                       </div>
                       {/* Outline color */}
                       <div className={`flex items-center gap-2 transition-opacity ${subtitleStyle.outline_width === 0 ? "opacity-40 pointer-events-none" : ""}`}>
-                        <span className="text-xs text-muted-foreground w-16">색상</span>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">{t("subtitleColor")}</span>
                         <input
                           type="color"
                           value={assToHex(subtitleStyle.outline_color)}
@@ -815,10 +826,10 @@ export function SubtitleWorkspace({
 
                     {/* Position */}
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">위치</span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-muted-foreground">드래그 적용:</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t("subtitlePosition")}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] text-muted-foreground">{t("subtitleDragApply")}:</span>
                           {(["all", "single"] as const).map((mode) => (
                             <button
                               key={mode}
@@ -826,10 +837,10 @@ export function SubtitleWorkspace({
                               className={`px-1.5 py-0.5 text-[10px] rounded transition-all ${
                                 positionMode === mode
                                   ? "bg-primary/15 text-primary font-medium"
-                                  : "text-muted-foreground hover:text-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                               }`}
                             >
-                              {mode === "all" ? "전체" : "개별"}
+                              {mode === "all" ? t("subtitleApplyAll") : t("subtitleApplySingle")}
                             </button>
                           ))}
                         </div>
@@ -843,10 +854,9 @@ export function SubtitleWorkspace({
                               subtitleStyle.alignment === p.alignment
                                 ? "bg-primary/15 text-primary border-primary/30 font-medium"
                                 : "border-muted hover:bg-accent"
-                            }`}
+                              }`}
                           >
-                            {p.label === "Bottom" ? "하단" :
-                             p.label === "Center" ? "중앙" : "상단"}
+                            {positionPresetLabels[p.label]}
                           </button>
                         ))}
                       </div>
@@ -863,7 +873,7 @@ export function SubtitleWorkspace({
                                 onClick={() => handlePositionReset(activeSeg.id)}
                                 className="px-2 py-1 text-[10px] rounded border border-muted text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors"
                               >
-                                현재 자막 초기화
+                                {t("subtitleResetCurrent")}
                               </button>
                             )}
                             {anyHasPos && (
@@ -871,7 +881,7 @@ export function SubtitleWorkspace({
                                 onClick={handlePositionResetAll}
                                 className="px-2 py-1 text-[10px] rounded border border-muted text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors"
                               >
-                                전체 초기화
+                                {t("subtitleResetAll")}
                               </button>
                             )}
                           </div>
@@ -946,7 +956,7 @@ export function SubtitleWorkspace({
 
                     {/* Fallback providers */}
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">폴백:</span>
+                      <span className="text-xs text-muted-foreground">{t("fallbackProviders")}:</span>
                       {AI_PROVIDERS.filter(p => p.id !== provider).map(p => (
                         <label key={p.id} className="flex items-center gap-1 text-xs">
                           <input
@@ -969,7 +979,7 @@ export function SubtitleWorkspace({
                     {/* Translation context */}
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">컨텍스트:</span>
+                        <span className="text-xs text-muted-foreground">{t("translationContext")}:</span>
                         {mediaType === "video" && (
                           <button
                             onClick={async () => {
@@ -983,7 +993,7 @@ export function SubtitleWorkspace({
                                 })
                                 setTranslationContext(result.context)
                               } catch (e) {
-                                setTranslateError(e instanceof Error ? e.message : "분석 실패")
+                                setTranslateError(e instanceof Error ? e.message : t("analyzeFailed"))
                               } finally {
                                 setAnalyzing(false)
                               }
@@ -991,14 +1001,14 @@ export function SubtitleWorkspace({
                             disabled={analyzing || translating}
                             className="px-2 py-0.5 text-[11px] rounded-full border border-blue-400/50 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
                           >
-                            {analyzing ? "분석 중..." : "영상 자동 분석"}
+                            {analyzing ? t("analyzing") : t("autoAnalyzeVideo")}
                           </button>
                         )}
                       </div>
                       <textarea
                         value={translationContext}
                         onChange={(e) => setTranslationContext(e.target.value)}
-                        placeholder="영상 자동 분석을 누르면 작품명, 캐릭터, 용어 등을 자동으로 파악��니다. 직접 입력도 가능합니다."
+                        placeholder={t("translationContextPlaceholder")}
                         rows={translationContext ? 5 : 2}
                         className="w-full text-xs px-2 py-1.5 rounded-md border bg-background resize-none placeholder:text-muted-foreground/50"
                       />
@@ -1010,7 +1020,7 @@ export function SubtitleWorkspace({
                         onClick={() => setGlossaryOpen(!glossaryOpen)}
                         className="w-full flex items-center justify-between px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors"
                       >
-                        <span className="font-medium">��어집 ({glossary.length})</span>
+                        <span className="font-medium">{t("glossary")} ({glossary.length})</span>
                         <svg className={`w-3 h-3 transition-transform ${glossaryOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                         </svg>
@@ -1022,21 +1032,19 @@ export function SubtitleWorkspace({
                               <table className="w-full text-xs">
                                 <thead className="bg-muted/30 sticky top-0">
                                   <tr>
-                                    <th className="px-2 py-1 text-left font-medium">원문</th>
-                                    <th className="px-2 py-1 text-left font-medium">번역</th>
-                                    <th className="px-2 py-1 text-left font-medium w-16">분류</th>
+                                    <th className="px-2 py-1 text-left font-medium">{t("subtitleOriginal")}</th>
+                                    <th className="px-2 py-1 text-left font-medium">{t("subtitleTranslation")}</th>
+                                    <th className="px-2 py-1 text-left font-medium w-24">{t("subtitleCategory")}</th>
                                     <th className="w-6" />
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {glossary.map(e => (
                                     <tr key={e.id} className="border-t hover:bg-accent/20">
-                                      <td className="px-2 py-0.5">{e.source}</td>
-                                      <td className="px-2 py-0.5">{e.target}</td>
+                                      <td className="px-2 py-0.5 break-words">{e.source}</td>
+                                      <td className="px-2 py-0.5 break-words">{e.target}</td>
                                       <td className="px-2 py-0.5 text-muted-foreground">
-                                        {e.category === "character" ? "인물" :
-                                         e.category === "place" ? "장소" :
-                                         e.category === "term" ? "용어" : "일반"}
+                                        {subtitleCategoryLabels[e.category]}
                                       </td>
                                       <td>
                                         <button
@@ -1056,26 +1064,26 @@ export function SubtitleWorkspace({
                             <input
                               value={glossaryNewSource}
                               onChange={e => setGlossaryNewSource(e.target.value)}
-                              placeholder="원문"
+                              placeholder={t("subtitleOriginal")}
                               className="flex-1 text-xs px-1.5 py-1 rounded border bg-background min-w-0"
                               onKeyDown={e => e.key === "Enter" && handleAddGlossary()}
                             />
                             <input
                               value={glossaryNewTarget}
                               onChange={e => setGlossaryNewTarget(e.target.value)}
-                              placeholder="번역"
+                              placeholder={t("subtitleTranslation")}
                               className="flex-1 text-xs px-1.5 py-1 rounded border bg-background min-w-0"
                               onKeyDown={e => e.key === "Enter" && handleAddGlossary()}
                             />
                             <select
                               value={glossaryNewCategory}
                               onChange={e => setGlossaryNewCategory(e.target.value as typeof glossaryNewCategory)}
-                              className="text-xs px-1 py-1 rounded border bg-background w-14"
+                              className="w-24 shrink-0 text-xs px-1 py-1 rounded border bg-background"
                             >
-                              <option value="general">일반</option>
-                              <option value="character">인물</option>
-                              <option value="place">장소</option>
-                              <option value="term">용어</option>
+                              <option value="general">{t("subtitleCategoryGeneral")}</option>
+                              <option value="character">{t("subtitleCategoryCharacter")}</option>
+                              <option value="place">{t("subtitleCategoryPlace")}</option>
+                              <option value="term">{t("subtitleCategoryTerm")}</option>
                             </select>
                             <button
                               onClick={handleAddGlossary}
@@ -1092,7 +1100,7 @@ export function SubtitleWorkspace({
                                 disabled={analyzing || translating}
                                 className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
                               >
-                                {analyzing ? "분석 중..." : "영상 분석으로 자동 생성"}
+                                {analyzing ? t("analyzing") : t("autoGenerateFromVideoAnalysis")}
                               </button>
                             </div>
                           )}
@@ -1122,7 +1130,7 @@ export function SubtitleWorkspace({
                           </div>
                           <span className="text-xs min-w-[3rem]">
                             {jobProgress.status === "completed"
-                              ? "완료!"
+                              ? t("completedBang")
                               : jobProgress.message && jobProgress.progress < 0.1
                                 ? jobProgress.message
                                 : `${Math.round(jobProgress.progress * 100)}%`}

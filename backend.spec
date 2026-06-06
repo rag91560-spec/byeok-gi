@@ -59,6 +59,11 @@ a = Analysis(
         "pydantic",
         # email-validator (optional for pydantic)
         "email_validator",
+        # TMP_FontAsset 폰트 패치 (ue_translator.py TMPFontPatcher)
+        "freetype",
+        "scipy",
+        "scipy.ndimage",
+        *collect_submodules("scipy.ndimage"),
     ],
     hookspath=[],
     hooksconfig={},
@@ -66,7 +71,6 @@ a = Analysis(
     excludes=[
         "tkinter",
         "matplotlib",
-        "scipy",
         "pandas",
         "pytest",
         # torch is a 4GB optional fallback — excluded from build bundle

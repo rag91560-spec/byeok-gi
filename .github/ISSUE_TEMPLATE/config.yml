@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discord support
+    url: https://discord.gg/a6FXkPrFAZ
+    about: Use Discord for quick support questions that do not include secrets or copyrighted files.
+  - name: Security policy
+    url: https://github.com/rag91560-spec/varo/security/policy
+    about: Use the security policy for vulnerabilities and privacy-sensitive reports.

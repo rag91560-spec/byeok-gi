@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -14,14 +15,14 @@ import {
   GlobeIcon,
   SlidersHorizontalIcon,
   DatabaseIcon,
-  ShieldCheckIcon,
-  DownloadIcon,
   ScanEyeIcon,
-  PlayCircleIcon,
   BookOpenIcon,
   ChevronDownIcon,
+  BookTextIcon,
   Gamepad2Icon,
-  MusicIcon,
+  FileAudioIcon,
+  FileVideoIcon,
+  Trash2Icon,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -42,9 +43,11 @@ interface NavItem {
 
 const LIBRARY_SUB_ITEMS: readonly NavItem[] = [
   { labelKey: "games", href: "/library", icon: Gamepad2Icon },
-  { labelKey: "videos", href: "/videos", icon: PlayCircleIcon },
-  { labelKey: "audio", href: "/audio", icon: MusicIcon },
+  { labelKey: "videos", href: "/videos", icon: FileVideoIcon },
+  { labelKey: "audio", href: "/audio", icon: FileAudioIcon },
+  { labelKey: "novels", href: "/novels", icon: BookTextIcon },
   { labelKey: "manga", href: "/manga", icon: BookOpenIcon },
+  { labelKey: "libraryTrash", href: "/library/trash", icon: Trash2Icon },
 ]
 
 const LIBRARY_PATHS = LIBRARY_SUB_ITEMS.map(i => i.href)
@@ -55,29 +58,25 @@ const NAV_ITEMS: readonly NavItem[] = [
   { labelKey: "presets", href: "/presets", icon: SlidersHorizontalIcon, group: "tools" },
   { labelKey: "translationMemory", href: "/memory", icon: DatabaseIcon, group: "tools" },
   { labelKey: "models", href: "/models", icon: BrainCircuitIcon, group: "tools", badge: "comingSoon" },
-  { labelKey: "settings", href: "/settings", icon: SettingsIcon, group: "system" },
-  { labelKey: "download", href: "/download", icon: DownloadIcon, group: "system" },
-  { labelKey: "admin", href: "/admin", icon: ShieldCheckIcon, group: "system" },
 ]
+
+const noDragStyle = { WebkitAppRegion: "no-drag" } as React.CSSProperties
 
 function TranslatorLogo({ className }: { readonly className?: string }) {
   return (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 28 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={2.5}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn("size-5", className)}
+      className={cn("h-5 w-auto", className)}
       aria-hidden="true"
     >
-      <path d="M5 8l6 6" />
-      <path d="M4 14l6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2h1" />
-      <path d="m22 22-5-10-5 10" />
-      <path d="M14 18h6" />
+      {/* Varo mark: asymmetric V with a right-pointing arrow. */}
+      <path d="M3 5 L10 19 L17 5 L25 5" />
+      <path d="M22 2 L25 5 L22 8" />
     </svg>
   )
 }
@@ -134,7 +133,7 @@ function useSdkAutoSetup() {
 export function Sidebar() {
   const pathname = usePathname()
   const { t, locale, toggleLocale } = useLocale()
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
   const [isElectron, setIsElectron] = React.useState(false)
   const sdkProgress = useSdkAutoSetup()
   const isLibraryPath = LIBRARY_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))
@@ -167,10 +166,20 @@ export function Sidebar() {
     : theme === "light" ? t("lightMode")
     : t("systemMode")
 
+  const localeToggleLabel = locale === "ko" ? t("switchToEnglish") : t("switchToKorean")
+
   // Group nav items
   const mainItems = NAV_ITEMS.filter(i => !i.group)
   const toolItems = NAV_ITEMS.filter(i => i.group === "tools")
-  const systemItems = NAV_ITEMS.filter(i => i.group === "system")
+  const isSettingsActive = pathname === "/settings" || pathname.startsWith("/settings/")
+
+  const isLibrarySubItemActive = (item: NavItem) => {
+    const isTrashPath = pathname === "/library/trash" || pathname.startsWith("/library/trash/")
+    if (item.href === "/library") {
+      return pathname === "/library" || (!isTrashPath && /^\/library\/[^/]+$/.test(pathname))
+    }
+    return pathname === item.href || pathname.startsWith(`${item.href}/`)
+  }
 
   const renderNavItem = (item: NavItem) => {
     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
@@ -180,6 +189,7 @@ export function Sidebar() {
         key={item.labelKey}
         href={item.href}
         title={t(item.labelKey)}
+        style={noDragStyle}
         className={cn(
           "flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
           "justify-center md:justify-start px-0 md:px-3 py-2.5 md:py-[7px]",
@@ -205,17 +215,24 @@ export function Sidebar() {
     <aside className={cn(
       "flex flex-col shrink-0 sticky top-0 h-screen bg-sidebar-bg border-r border-border-subtle",
       "w-14 md:w-[200px]"
-    )}>
+    )} style={noDragStyle}>
       {/* Logo — drag region in Electron */}
       <div className={cn(
         "flex items-center gap-2.5 px-3 md:px-4 h-14 shrink-0 sidebar-drag-region border-b border-border-subtle",
         isElectron && "electron-titlebar-pad"
       )}>
-        <Link href="/" className="flex items-center gap-2.5">
-          <TranslatorLogo className="text-accent shrink-0" />
-          <span className="hidden md:inline text-sm font-bold text-text-primary tracking-tight">
-            번<span className="text-accent">@</span>역<span className="text-accent">+</span>기<span className="text-accent">!</span>
-          </span>
+        <Link href="/" aria-label={t("appName")} title={t("appName")} className="flex items-center" style={noDragStyle}>
+          <TranslatorLogo className="md:hidden text-accent shrink-0" />
+          <Image
+            src={resolvedTheme === "light" ? "/branding/varo-logo-light.png" : "/branding/varo-logo.png"}
+            alt=""
+            width={1228}
+            height={519}
+            aria-hidden="true"
+            className="hidden md:block h-9 w-auto max-w-[160px] shrink-0 translate-y-1.5 object-contain"
+            draggable={false}
+            priority
+          />
         </Link>
       </div>
 
@@ -227,6 +244,7 @@ export function Sidebar() {
           <Link
             href="/library"
             title={t("library")}
+            style={noDragStyle}
             className={cn(
               "flex items-center justify-center rounded-lg text-[13px] transition-all duration-150 md:hidden",
               "px-0 py-2.5",
@@ -237,10 +255,34 @@ export function Sidebar() {
           >
             <LibraryIcon className={cn("size-[18px] shrink-0", isLibraryPath ? "text-accent" : "text-inherit")} />
           </Link>
+          {/* Mobile: keep library surfaces, including Trash, visible as icon-only launch targets. */}
+          <div className="md:hidden space-y-0.5">
+            {LIBRARY_SUB_ITEMS.map(item => {
+              const isActive = isLibrarySubItemActive(item)
+              const Icon = item.icon
+              return (
+                <Link
+                  key={item.labelKey}
+                  href={item.href}
+                  title={t(item.labelKey)}
+                  style={noDragStyle}
+                  className={cn(
+                    "flex items-center justify-center rounded-lg px-0 py-2.5 text-[13px] transition-all duration-150",
+                    isActive
+                      ? "text-foreground font-medium bg-accent-muted shadow-[inset_0_0_0_1px_var(--accent-muted)]"
+                      : "text-text-secondary hover:text-text-primary hover:bg-overlay-4"
+                  )}
+                >
+                  <Icon className={cn("size-[18px] shrink-0", isActive ? "text-accent" : "text-inherit")} />
+                </Link>
+              )
+            })}
+          </div>
           {/* Desktop: collapsible header */}
           <button
             type="button"
             onClick={() => setLibraryOpen(prev => !prev)}
+            style={noDragStyle}
             className={cn(
               "hidden md:flex w-full items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
               "px-3 py-[7px]",
@@ -260,13 +302,14 @@ export function Sidebar() {
           {libraryOpen && (
             <div className="hidden md:block space-y-0.5">
               {LIBRARY_SUB_ITEMS.map(item => {
-                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                const isActive = isLibrarySubItemActive(item)
                 const Icon = item.icon
                 return (
                   <Link
                     key={item.labelKey}
                     href={item.href}
                     title={t(item.labelKey)}
+                    style={noDragStyle}
                     className={cn(
                       "flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-150",
                       "pl-7 pr-3 py-[7px]",
@@ -295,11 +338,6 @@ export function Sidebar() {
           {toolItems.map(renderNavItem)}
         </div>
 
-        {/* System separator */}
-        <div className="mx-3 md:mx-4 my-3 h-px bg-border-subtle" />
-        <div className="px-1.5 md:px-2.5 space-y-0.5">
-          {systemItems.map(renderNavItem)}
-        </div>
       </nav>
 
       {/* SDK setup progress */}
@@ -325,36 +363,74 @@ export function Sidebar() {
       {/* Bottom controls */}
       <div className="shrink-0 border-t border-border-subtle">
         <div className="flex flex-col items-center gap-1 py-2 md:hidden">
+          <Link
+            href="/settings"
+            title={t("settings")}
+            style={noDragStyle}
+            className={cn(
+              "size-9 flex items-center justify-center rounded-lg transition-colors",
+              isSettingsActive
+                ? "bg-accent-muted text-accent"
+                : "text-text-secondary hover:text-text-primary hover:bg-overlay-4",
+            )}
+          >
+            <SettingsIcon className="size-4" />
+          </Link>
           <button
+            type="button"
             onClick={cycleTheme}
+            style={noDragStyle}
             className="size-9 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-colors"
             title={themeLabel}
           >
             {themeIcon}
           </button>
           <button
+            type="button"
             onClick={toggleLocale}
-            className="size-9 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-colors"
-            title={locale === "ko" ? "Switch to English" : "한국어로 전환"}
+            style={noDragStyle}
+            className="size-9 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-overlay-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 transition-colors"
+            title={localeToggleLabel}
           >
             <GlobeIcon className="size-4" />
           </button>
         </div>
-        <div className="hidden md:flex items-center gap-1 px-3 py-2.5">
-          <button
-            onClick={cycleTheme}
-            className="flex-1 flex items-center gap-1.5 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded transition-colors"
+        <div className="hidden md:flex flex-col gap-1 px-2.5 py-2.5">
+          <Link
+            href="/settings"
+            title={t("settings")}
+            style={noDragStyle}
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] transition-all duration-150",
+              isSettingsActive
+                ? "bg-accent-muted text-foreground font-medium shadow-[inset_0_0_0_1px_var(--accent-muted)]"
+                : "text-text-secondary hover:text-text-primary hover:bg-overlay-4",
+            )}
           >
-            {themeIcon}
-            <span>{themeLabel}</span>
-          </button>
-          <button
-            onClick={toggleLocale}
-            className="flex items-center gap-1 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded transition-colors"
-          >
-            <GlobeIcon className="size-3.5" />
-            <span>{locale === "ko" ? "KR" : "EN"}</span>
-          </button>
+            <SettingsIcon className={cn("size-[18px] shrink-0", isSettingsActive ? "text-accent" : "text-inherit")} />
+            <span>{t("settings")}</span>
+          </Link>
+          <div className="flex items-center gap-1 px-0.5">
+            <button
+              type="button"
+              onClick={cycleTheme}
+              style={noDragStyle}
+              className="flex-1 flex items-center gap-1.5 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded transition-colors"
+            >
+              {themeIcon}
+              <span>{themeLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleLocale}
+              style={noDragStyle}
+              className="flex items-center gap-1 text-text-tertiary hover:text-text-primary text-xs py-1 px-1.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 transition-colors"
+              title={localeToggleLabel}
+            >
+              <GlobeIcon className="size-3.5" />
+              <span>{locale === "ko" ? "KR" : "EN"}</span>
+            </button>
+          </div>
         </div>
       </div>
     </aside>

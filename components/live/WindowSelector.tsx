@@ -26,23 +26,23 @@ export function WindowSelector({ sources, selectedId, onSelect, onRefresh }: Win
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-text-primary">캡처 대상</h3>
+        <h3 className="text-sm font-medium text-text-primary">{t("captureTarget")}</h3>
         <button
           onClick={onRefresh}
-          className="text-text-tertiary hover:text-text-primary transition-colors"
-          title="새로고침"
+          className="rounded p-1 text-text-tertiary hover:bg-overlay-4 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 transition-colors"
+          title={t("refreshCaptureSources")}
         >
           <RefreshCwIcon className="size-4" />
         </button>
       </div>
 
       {sources.length === 0 ? (
-        <p className="text-xs text-text-tertiary py-4 text-center">캡처 가능한 윈도우를 불러오는 중...</p>
+        <p className="text-xs text-text-tertiary py-4 text-center">{t("loadingCaptureSources")}</p>
       ) : (
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
           {screens.length > 0 && (
             <>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-tertiary px-1 pt-1">화면</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-tertiary px-1 pt-1">{t("screens")}</p>
               {screens.map((s) => (
                 <SourceItem key={s.id} source={s} selected={selectedId === s.id} onSelect={onSelect} />
               ))}
@@ -50,7 +50,7 @@ export function WindowSelector({ sources, selectedId, onSelect, onRefresh }: Win
           )}
           {windows.length > 0 && (
             <>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-tertiary px-1 pt-2">윈도우</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-tertiary px-1 pt-2">{t("windows")}</p>
               {windows.map((s) => (
                 <SourceItem key={s.id} source={s} selected={selectedId === s.id} onSelect={onSelect} />
               ))}
@@ -66,8 +66,9 @@ function SourceItem({ source, selected, onSelect }: { source: CaptureSource; sel
   return (
     <button
       onClick={() => onSelect(source)}
+      title={source.name}
       className={cn(
-        "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-all text-sm",
+        "w-full flex min-w-0 items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-all text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
         selected
           ? "bg-accent/15 text-accent border border-accent/30"
           : "text-text-secondary hover:bg-overlay-4 hover:text-text-primary border border-transparent"

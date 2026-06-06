@@ -1,6 +1,7 @@
 """Manga library and translation REST API."""
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+from PIL import Image
 from typing import Optional
 
 from .. import db
@@ -28,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/manga", tags=["manga"])
 
+MAX_MANGA_FILES = 300
+MAX_MANGA_IMAGE_SIZE = 20 * 1024 * 1024
+MAX_MANGA_TOTAL_SIZE = 300 * 1024 * 1024
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 # --- Models ---
 
 
@@ -41,6 +48,28 @@ class MangaUpdate(BaseModel):
 class BulkMoveRequest(BaseModel):
     ids: list[int]
     category_id: int | None = None
+
+
+async def _read_image_uploads(files: list[UploadFile]) -> list[tuple[bytes, str]]:
+    if len(files) > MAX_MANGA_FILES:
+        raise HTTPException(413, f"Too many images (max {MAX_MANGA_FILES})")
+    image_list: list[tuple[bytes, str]] = []
+    total = 0
+    for f in files:
+        data = await f.read(MAX_MANGA_IMAGE_SIZE + 1)
+        if len(data) > MAX_MANGA_IMAGE_SIZE:
+            raise HTTPException(413, "Image file too large")
+        total += len(data)
+        if total > MAX_MANGA_TOTAL_SIZE:
+            raise HTTPException(413, "Manga upload too large")
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+        except Exception as e:
+            raise HTTPException(400, f"Invalid image: {f.filename or 'upload'}") from e
+        ext = _ext_from_ct(f.content_type or "image/webp")
+        image_list.append((data, ext))
+    return image_list
 
 
 class BulkDeleteRequest(BaseModel):
@@ -68,6 +97,11 @@ def _ext_from_ct(content_type: str) -> str:
 @router.get("")
 async def list_manga_items(search: str = "", source_type: str = ""):
     return await db.list_manga(search=search, source_type=source_type)
+
+
+@router.get("/trash")
+async def list_manga_trash():
+    return await db.list_trash_items("manga")
 
 
 @router.get("/fonts")
@@ -111,7 +145,32 @@ async def bulk_move_manga(body: BulkMoveRequest):
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_manga(body: BulkDeleteRequest):
+async def legacy_bulk_remove_manga_from_library(body: BulkDeleteRequest):
+    """Legacy alias. Soft-removes from the library; does not delete managed files."""
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.remove_from_library("manga", body.ids)
+    return {"ok": True, "removed": count, "deleted": count, "count": count, "ids": body.ids}
+
+
+@router.post("/remove-from-library")
+async def remove_manga_from_library(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.remove_from_library("manga", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
+
+
+@router.post("/restore-from-trash")
+async def restore_manga_from_trash(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.restore_from_trash("manga", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
+
+
+@router.post("/delete-managed-files")
+async def bulk_delete_manga_managed_files(body: BulkDeleteRequest):
     if not body.ids:
         raise HTTPException(400, "ids must not be empty")
     deleted = 0
@@ -121,7 +180,7 @@ async def bulk_delete_manga(body: BulkDeleteRequest):
             delete_manga_files(mid)
             await db.delete_manga(mid)
             deleted += 1
-    return {"ok": True, "deleted": deleted}
+    return {"ok": True, "deleted": deleted, "count": deleted, "ids": body.ids}
 
 
 @router.put("/{manga_id}")
@@ -152,6 +211,8 @@ async def upload_manga(
     if not files:
         raise HTTPException(400, "At least one image file is required")
 
+    image_list = await _read_image_uploads(files)
+
     source_url = f"manual://{uuid.uuid4()}"
     manga = await db.create_manga(
         title=title,
@@ -160,13 +221,6 @@ async def upload_manga(
         page_count=0,
     )
     manga_id = manga["id"]
-
-    # Save images
-    image_list: list[tuple[bytes, str]] = []
-    for f in files:
-        data = await f.read()
-        ext = _ext_from_ct(f.content_type or "image/webp")
-        image_list.append((data, ext))
 
     page_count = add_images(manga_id, image_list)
 
@@ -187,11 +241,7 @@ async def add_manga_images(manga_id: int, files: list[UploadFile] = File(...)):
     if not manga:
         raise HTTPException(404, "Manga not found")
 
-    image_list: list[tuple[bytes, str]] = []
-    for f in files:
-        data = await f.read()
-        ext = _ext_from_ct(f.content_type or "image/webp")
-        image_list.append((data, ext))
+    image_list = await _read_image_uploads(files)
 
     page_count = add_images(manga_id, image_list)
     await db.update_manga(manga_id, page_count=page_count)
@@ -263,13 +313,23 @@ async def get_manga_item(manga_id: int):
 
 
 @router.delete("/{manga_id}")
-async def delete_manga_item(manga_id: int):
+async def legacy_delete_manga_removes_from_library(manga_id: int):
+    """Legacy DELETE alias. Soft-removes from the library; does not delete managed files."""
+    manga = await db.get_manga(manga_id)
+    if not manga:
+        raise HTTPException(404, "Manga not found")
+    count = await db.remove_from_library("manga", [manga_id])
+    return {"ok": True, "count": count, "ids": [manga_id]}
+
+
+@router.post("/{manga_id}/delete-managed-files")
+async def delete_manga_managed_files(manga_id: int):
     manga = await db.get_manga(manga_id)
     if not manga:
         raise HTTPException(404, "Manga not found")
     delete_manga_files(manga_id)
     await db.delete_manga(manga_id)
-    return {"ok": True}
+    return {"ok": True, "count": 1, "ids": [manga_id]}
 
 
 @router.get("/{manga_id}/images/{page}")
@@ -302,7 +362,9 @@ async def upload_manga_thumbnail(manga_id: int, file: UploadFile = File(...)):
         raise HTTPException(404, "Manga not found")
     dest = thumbnail_file(manga_id)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    content = await file.read()
+    content = await file.read(MAX_MANGA_IMAGE_SIZE + 1)
+    if len(content) > MAX_MANGA_IMAGE_SIZE:
+        raise HTTPException(413, "Thumbnail file too large")
     # Save as webp (same path as auto-generated thumbnails)
     from PIL import Image
     import io
@@ -816,5 +878,3 @@ async def render_status(manga_id: int):
         "rendered_pages": len(renders),
         "pages": pages,
     }
-
-

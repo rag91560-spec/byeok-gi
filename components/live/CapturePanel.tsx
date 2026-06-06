@@ -8,14 +8,12 @@ import {
   SquareIcon,
   CropIcon,
   XIcon,
-  LayersIcon,
   EyeIcon,
   EyeOffIcon,
-  Settings2Icon,
   ArrowRightIcon,
   LockIcon,
 } from "lucide-react"
-import type { LiveSettings, CaptureSource } from "@/lib/types"
+import type { LiveSettings } from "@/lib/types"
 
 interface CapturePanelProps {
   settings: LiveSettings
@@ -53,62 +51,66 @@ export function CapturePanel({
           onClick={onCapture}
           disabled={!settings.sourceId || loading}
           className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-            "bg-accent text-white hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            "flex min-w-0 items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+            "bg-accent text-white hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >
-          <CameraIcon className="size-4" />
-          {loading ? t("capturing") : t("captureAndTranslate")}
+          <CameraIcon className="size-4 shrink-0" />
+          <span className="truncate">{loading ? t("capturing") : t("captureAndTranslate")}</span>
         </button>
 
         {!capturing ? (
           <button
             onClick={onStartAuto}
             disabled={!settings.sourceId}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-all disabled:opacity-50"
+            className="flex min-w-0 items-center gap-2 px-3 py-2 rounded-lg text-sm border border-border-subtle text-text-secondary hover:bg-overlay-4 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 transition-all disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <PlayIcon className="size-4" />
-            {t("autoCapture")}
+            <PlayIcon className="size-4 shrink-0" />
+            <span className="truncate">{t("autoCapture")}</span>
           </button>
         ) : (
           <button
             onClick={onStopAuto}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all"
+            className="flex min-w-0 items-center gap-2 px-3 py-2 rounded-lg text-sm border border-red-500/30 text-red-400 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50 transition-all"
           >
-            <SquareIcon className="size-4" />
-            {t("autoStop")}
+            <SquareIcon className="size-4 shrink-0" />
+            <span className="truncate">{t("autoStop")}</span>
           </button>
         )}
 
         <button
           onClick={onToggleOverlay}
           className={cn(
-            "flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all",
+            "flex min-w-0 items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
             settings.overlayEnabled
               ? "border-accent/30 text-accent bg-accent/10"
               : "border-border-subtle text-text-secondary hover:text-text-primary hover:bg-overlay-4"
           )}
         >
-          {settings.overlayEnabled ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
-          {t("overlay")}
+          {settings.overlayEnabled ? <EyeIcon className="size-4 shrink-0" /> : <EyeOffIcon className="size-4 shrink-0" />}
+          <span className="truncate">{t("overlay")}</span>
         </button>
       </div>
 
       {/* Region */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onSelectRegion}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-overlay-4 transition-all"
+          className="flex min-w-0 items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-overlay-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 transition-all"
         >
-          <CropIcon className="size-3.5" />
-          {t("selectArea")}
+          <CropIcon className="size-3.5 shrink-0" />
+          <span className="truncate">{t("selectArea")}</span>
         </button>
         {settings.region && (
           <>
             <span className="text-[11px] text-text-tertiary">
               {Math.round(settings.region.width)}x{Math.round(settings.region.height)}
             </span>
-            <button onClick={onClearRegion} className="text-text-tertiary hover:text-red-400">
+            <button
+              onClick={onClearRegion}
+              className="text-text-tertiary hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+              title={t("clearCaptureRegion")}
+            >
               <XIcon className="size-3.5" />
             </button>
           </>
@@ -118,11 +120,11 @@ export function CapturePanel({
       {/* Language: Source → Target */}
       <div>
         <label className="text-[11px] text-text-tertiary mb-1.5 block">{t("translationDirection")}</label>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
           <select
             value={settings.language}
             onChange={(e) => onUpdateSettings({ language: e.target.value })}
-            className="flex-1 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="min-w-0 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
             <option value="auto">{t("autoDetect")}</option>
             <option value="ja">{t("japanese")}</option>
@@ -135,7 +137,7 @@ export function CapturePanel({
           <select
             value={settings.targetLang}
             onChange={(e) => onUpdateSettings({ targetLang: e.target.value })}
-            className="flex-1 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="min-w-0 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
             <option value="ko">{t("korean")}</option>
             <option value="en">{t("english")}</option>
@@ -146,7 +148,7 @@ export function CapturePanel({
       </div>
 
       {/* Provider & Engine */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <div className="flex items-center gap-1 mb-1">
             <label className="text-[11px] text-text-tertiary">{t("translationProvider")}</label>
@@ -163,17 +165,17 @@ export function CapturePanel({
               if (!licensed && val !== "offline" && val !== "test") return
               onUpdateSettings({ provider: val })
             }}
-            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="w-full min-w-0 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
             <option value="offline">{t("offlineNLLB")}</option>
             <option value="claude" disabled={!licensed}>
               {licensed ? "Claude" : t("claudeLicenseRequired")}
             </option>
             <option value="openai" disabled={!licensed}>
-              {licensed ? "OpenAI" : "OpenAI (라이선스 필요)"}
+              {licensed ? "OpenAI" : `OpenAI (${t("licenseRequiredShort")})`}
             </option>
             <option value="gemini" disabled={!licensed}>
-              {licensed ? "Gemini" : "Gemini (라이선스 필요)"}
+              {licensed ? "Gemini" : `Gemini (${t("licenseRequiredShort")})`}
             </option>
             <option value="test">{t("testEcho")}</option>
           </select>
@@ -184,7 +186,7 @@ export function CapturePanel({
           <select
             value={settings.ocrEngine}
             onChange={(e) => onUpdateSettings({ ocrEngine: e.target.value as LiveSettings["ocrEngine"] })}
-            className="w-full bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="w-full min-w-0 bg-overlay-4 border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
             <option value="auto">{t("autoRecommended")}</option>
             <option value="winocr">Windows OCR</option>
@@ -199,7 +201,7 @@ export function CapturePanel({
           <select
             value={settings.autoIntervalMs}
             onChange={(e) => onUpdateSettings({ autoIntervalMs: Number(e.target.value) })}
-            className="bg-overlay-4 border border-border-subtle rounded px-2 py-1 text-xs text-text-primary [&>option]:bg-[#1a1a2e] [&>option]:text-white"
+            className="bg-overlay-4 border border-border-subtle rounded px-2 py-1 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&>option]:bg-[#1a1a2e] [&>option]:text-white"
           >
             <option value={1000}>{t("interval1s")}</option>
             <option value={2000}>{t("interval2s")}</option>
@@ -225,7 +227,7 @@ export function CapturePanel({
 
       {/* Hotkey hints */}
       <div className="text-[11px] text-text-tertiary space-y-0.5">
-        <p>Ctrl+Shift+T: {t("captureAndTranslate")}  |  Ctrl+Shift+O: {t("overlay")}  |  Ctrl+Shift+R: {t("selectArea")}</p>
+        <p className="break-words">Ctrl+Shift+T: {t("captureAndTranslate")}  |  Ctrl+Shift+O: {t("overlay")}  |  Ctrl+Shift+R: {t("selectArea")}</p>
       </div>
     </div>
   )

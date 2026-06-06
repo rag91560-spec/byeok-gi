@@ -12,6 +12,23 @@ from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/api/filesystem", tags=["filesystem"])
 
+_SENSITIVE_PARTS = {
+    "cookies",
+    "login data",
+    "local storage",
+    "session storage",
+    "secure preferences",
+    "network",
+}
+
+
+def _reject_sensitive_path(path: Path) -> None:
+    lowered = {part.lower() for part in path.parts}
+    if "marketing" in lowered and "profiles" in lowered:
+        raise HTTPException(403, "Browser profile paths are not accessible")
+    if lowered & _SENSITIVE_PARTS:
+        raise HTTPException(403, "Sensitive browser storage paths are not accessible")
+
 
 @router.get("/browse")
 async def browse(
@@ -43,6 +60,10 @@ async def browse(
             path = "/"
 
     path = os.path.normpath(path)
+    try:
+        _reject_sensitive_path(Path(path).resolve())
+    except HTTPException as e:
+        return {"path": path, "parent": None, "entries": [], "error": e.detail}
     if not os.path.isdir(path):
         return {"path": path, "parent": None, "entries": [], "error": "Not a directory"}
 
@@ -102,11 +123,13 @@ async def browse(
 @router.get("/serve")
 async def serve_file(path: str = Query(..., description="Absolute file path to serve")):
     """Serve a local file (images only, for manga browser)."""
-    if not os.path.isfile(path):
+    resolved = Path(path).resolve()
+    _reject_sensitive_path(resolved)
+    if not resolved.is_file():
         raise HTTPException(404, "File not found")
     # Only allow image files
-    ext = os.path.splitext(path)[1].lower()
+    ext = resolved.suffix.lower()
     allowed = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
     if ext not in allowed:
         raise HTTPException(403, "Only image files are allowed")
-    return FileResponse(path)
+    return FileResponse(str(resolved))

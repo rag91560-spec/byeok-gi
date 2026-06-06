@@ -1,4 +1,4 @@
-"""Build the backend into a standalone exe using PyInstaller."""
+"""Build the backend into a standalone executable using PyInstaller."""
 
 import subprocess
 import shutil
@@ -10,7 +10,21 @@ SPEC_FILE = ROOT / "backend.spec"
 DIST_DIR = ROOT / "dist" / "backend-dist"
 
 
+def expected_backend_names():
+    primary = "backend.exe" if sys.platform.startswith("win") else "backend"
+    fallback = "backend" if primary == "backend.exe" else "backend.exe"
+    return [primary, fallback]
+
+
 def main():
+    if not ((3, 10) <= sys.version_info[:2] < (3, 13)):
+        print(
+            "[build-backend] ERROR: Backend packaging requires Python 3.10, 3.11, or 3.12. "
+            f"Current Python is {sys.version.split()[0]}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Ensure all dependencies are installed
     req_file = ROOT / "backend" / "requirements.txt"
     if req_file.exists():
@@ -48,10 +62,12 @@ def main():
         print("[build-backend] PyInstaller failed!", file=sys.stderr)
         sys.exit(1)
 
-    # Verify output
-    exe_path = DIST_DIR / "backend.exe"
-    if not exe_path.exists():
-        print(f"[build-backend] ERROR: {exe_path} not found!", file=sys.stderr)
+    # Verify output. PyInstaller uses "backend.exe" on Windows and "backend"
+    # on macOS/Linux even though the same spec name is used.
+    exe_path = next((DIST_DIR / name for name in expected_backend_names() if (DIST_DIR / name).exists()), None)
+    if exe_path is None:
+        expected = ", ".join(str(DIST_DIR / name) for name in expected_backend_names())
+        print(f"[build-backend] ERROR: backend executable not found. Expected one of: {expected}", file=sys.stderr)
         sys.exit(1)
 
     size_mb = exe_path.stat().st_size / (1024 * 1024)

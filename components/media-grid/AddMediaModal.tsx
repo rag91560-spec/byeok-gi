@@ -88,7 +88,7 @@ export function AddMediaModal({
       setDlJobId("")
       setLoading(false)
       if (d.video_id) {
-        onAdded({ id: d.video_id, title: d.title ?? "Downloaded", type: "local", source: "", thumbnail: "", duration: d.duration ?? 0, size: d.filesize ?? 0, category_id: null, sort_order: 0, created_at: "", updated_at: "" })
+        onAdded({ id: d.video_id, title: d.title ?? "Downloaded", type: "local", source: "", thumbnail: "", duration: d.duration ?? 0, size: d.filesize ?? 0, category_id: null, sort_order: 0, created_at: "", updated_at: "", removed_at: null })
         onClose()
       }
     }) as EventListener)

@@ -93,7 +93,7 @@ export function parseVTT(raw: string): ScriptCue[] {
   const blocks = content.split(/\n\n+/)
   for (const block of blocks) {
     const lines = block.split("\n")
-    let timeLineIdx = lines.findIndex((l) => l.includes("-->"))
+    const timeLineIdx = lines.findIndex((l) => l.includes("-->"))
     if (timeLineIdx < 0) continue
     const timeMatch = lines[timeLineIdx].match(/(.+?)\s*-->\s*(.+)/)
     if (!timeMatch) continue

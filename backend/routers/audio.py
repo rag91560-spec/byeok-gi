@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import os
+import contextlib
 import re
 import uuid
 
@@ -93,14 +94,33 @@ async def bulk_move_audio(body: BulkMoveRequest):
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_audio(body: BulkDeleteRequest):
+async def legacy_bulk_remove_audio_from_library(body: BulkDeleteRequest):
+    """Legacy alias. Soft-removes from the library; does not delete source files."""
     if not body.ids:
         raise HTTPException(400, "ids must not be empty")
-    deleted = 0
-    for aid in body.ids:
-        if await db.delete_audio_item(aid):
-            deleted += 1
-    return {"ok": True, "deleted": deleted}
+    count = await db.remove_from_library("audio", body.ids)
+    return {"ok": True, "removed": count, "deleted": count, "count": count, "ids": body.ids}
+
+
+@router.get("/trash")
+async def list_audio_trash():
+    return await db.list_trash_items("audio")
+
+
+@router.post("/remove-from-library")
+async def remove_audio_from_library(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.remove_from_library("audio", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
+
+
+@router.post("/restore-from-trash")
+async def restore_audio_from_trash(body: BulkDeleteRequest):
+    if not body.ids:
+        raise HTTPException(400, "ids must not be empty")
+    count = await db.restore_from_trash("audio", body.ids)
+    return {"ok": True, "count": count, "ids": body.ids}
 
 
 @router.get("")
@@ -252,16 +272,18 @@ async def upload_audio(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
-    chunks = []
     total = 0
-    while chunk := await file.read(8192):
-        total += len(chunk)
-        if total > MAX_AUDIO_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large (max 100MB)")
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    with open(dest, "wb") as f:
-        f.write(content)
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_AUDIO_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large (max 100MB)")
+                f.write(chunk)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(dest)
+        raise
     title = os.path.splitext(file.filename or "audio")[0]
     abs_dest = os.path.abspath(dest)
     return await db.create_audio_item(
@@ -270,7 +292,7 @@ async def upload_audio(file: UploadFile = File(...)):
         source=abs_dest,
         thumbnail="",
         duration=probe_media_duration(abs_dest),
-        size=len(content),
+        size=total,
         sort_order=0,
     )
 
@@ -285,11 +307,13 @@ async def update_audio(audio_id: int, body: AudioUpdate):
 
 
 @router.delete("/{audio_id}")
-async def delete_audio(audio_id: int):
-    deleted = await db.delete_audio_item(audio_id)
-    if not deleted:
+async def legacy_delete_audio_removes_from_library(audio_id: int):
+    """Legacy DELETE alias. Soft-removes from the library; does not delete source files."""
+    item = await db.get_audio_item(audio_id)
+    if not item:
         raise HTTPException(404, "Audio not found")
-    return {"ok": True}
+    count = await db.remove_from_library("audio", [audio_id])
+    return {"ok": True, "count": count, "ids": [audio_id]}
 
 
 @router.get("/{audio_id}/serve")

@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect } from "react"
 import { ScanEyeIcon, AlertTriangleIcon } from "lucide-react"
 import { useLiveTranslation } from "@/hooks/use-live-translation"
 import { useLicenseStatus } from "@/hooks/use-api"

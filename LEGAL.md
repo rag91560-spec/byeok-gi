@@ -1,64 +1,50 @@
-# Legal & Takedown Policy
+# Legal and Takedown Policy
 
-## For Copyright Holders
+Varo is a translation workflow tool. It does not contain, redistribute, sell, or bundle copyrighted game content.
 
-If you are a rights holder of a game whose engine is supported by Varo and wish to have that support removed, please:
+## For Rights Holders
 
-1. Open a [GitHub Issue](../../issues/new) labeled `legal-takedown`, **or**
-2. Contact us via Discord: https://discord.gg/a6FXkPrFAZ
+If you are a rights holder for a game or engine supported by Varo and want support removed or changed, please open a GitHub issue labeled `legal-takedown` or contact the maintainer through the Discord server linked in the README.
 
-Include:
-- Title of the game / engine
-- Proof of rights (publisher / developer affiliation, registered domain email preferred)
-- Specific module or feature you want disabled
+Please include:
 
-We commit to disabling the requested engine module within **24 hours** of verification.
+- the title of the game or engine
+- proof of rights-holder status, preferably from a publisher, developer, or registered domain email
+- the module, feature, or behavior you want removed or disabled
+- any deadline or jurisdiction-specific concern that affects the request
 
----
+The maintainer will review verified requests promptly and disable or change the relevant module when the request is valid.
 
-## Scope of This Repository
+## Repository Scope
 
-Varo is a translation tool. The repository contains:
-- Launcher (Electron)
-- UI (Next.js)
-- Engine adapters (parsing logic for game file formats)
+This repository contains:
 
-The repository **does not** contain:
-- Copyrighted game assets
-- Pre-translated game files
-- Cracked or pirated game content
-- Any DRM circumvention intended for piracy (the tool only reads/writes text data needed for translation)
+- Electron launcher code
+- Next.js UI code
+- FastAPI backend orchestration
+- local library and workflow code
+- format adapters and integration logic that can be maintained in public
+- documentation, release helpers, and support templates
 
----
+This repository does not contain:
+
+- copyrighted game assets
+- pre-translated game files
+- cracked or pirated game content
+- DRM-circumvention tooling intended for piracy
+- credentials or private API keys
 
 ## User Responsibility
 
-End users are solely responsible for:
-- Owning legitimate copies of any games they translate
-- Compliance with applicable copyright law in their jurisdiction
-- Compliance with the game's EULA
-- Not redistributing, selling, or publicly sharing translated content
+Users are solely responsible for:
 
-The Varo developer assumes no liability for end-user misuse.
+- owning legitimate copies of any game they translate
+- complying with applicable copyright law
+- complying with the game's license and EULA
+- not redistributing translated game content unless they have permission
 
----
+The maintainer is not responsible for misuse by end users.
 
-## 권리자/저작권 침해 신고 (한국어)
+## AI Assistance
 
-본인이 권리자이시고 특정 게임/엔진의 Varo 지원 중단을 원하실 경우:
-
-1. [GitHub Issue](../../issues/new) — 라벨 `legal-takedown`, **또는**
-2. Discord: https://discord.gg/a6FXkPrFAZ
-
-요청 시 포함 사항:
-- 게임 제목 / 엔진명
-- 권리 증빙 (퍼블리셔/개발사 소속, 등록 도메인 이메일 우선)
-- 비활성화 요청 모듈 또는 기능
-
-검증 후 **24시간 내** 해당 엔진 모듈 비활성화 처리합니다.
-
----
-
-## Repository scope (한국어 요약)
-
-본 레포지토리는 게임 파일 포맷 분석 및 텍스트 추출/적용 코드만 포함하며, 저작권 있는 게임 자산이나 번역된 게임 파일, 크랙/불법 복제 콘텐츠를 일체 포함하지 않습니다. 도구는 번역에 필요한 텍스트 데이터만 읽고 쓰며, 불법 복제를 위한 DRM 우회 목적으로 설계되지 않았습니다.
+AI coding assistants may help with implementation, review, tests, documentation, and release checks. The human maintainer remains responsible for all accepted changes. See [AI_ASSISTANCE.md](AI_ASSISTANCE.md).

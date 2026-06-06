@@ -323,6 +323,14 @@ export default function StringsPage({
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map())
   const tableContainerRef = useRef<HTMLDivElement>(null)
 
+  // Reattach progress polling when this page opens while a backend translation
+  // is already running, or after a transient disconnect/reset.
+  useEffect(() => {
+    if (game?.status === "translating" && translationStatus === "idle") {
+      connectSSE()
+    }
+  }, [game?.status, translationStatus, connectSSE])
+
   // Auto-scroll to current translating row
   useEffect(() => {
     if (currentIndex == null) return
@@ -388,6 +396,7 @@ export default function StringsPage({
         provider,
         source_lang: game.source_lang || "auto",
         preset_id: game.preset_id ?? undefined,
+        use_memory: false,
       }
 
       if (mode === "selected" && selected.size > 0) {
@@ -395,20 +404,15 @@ export default function StringsPage({
         req.start_index = indices[0]
         req.end_index = indices[indices.length - 1] + 1
       } else if (mode === "retranslate") {
-        // Reset translated entries to pending first, then translate all
-        const translatedEntries = entries.filter((e) => e.status === "translated")
-        if (translatedEntries.length > 0) {
-          await api.strings.bulkUpdate(gameId, {
-            indices: translatedEntries.map((e) => e._index),
-            status: "pending",
-          })
-          await fetchStrings()
-        }
+        await api.strings.resetTranslations(gameId)
+        await fetchStrings()
       }
 
+      resetSSE()
       await api.translate.start(gameId, req)
       connectSSE()
     } catch (err) {
+      resetSSE()
       setError(err instanceof Error ? err.message : "Translation failed")
     } finally {
       setTranslateLoading(false)
@@ -432,8 +436,11 @@ export default function StringsPage({
     if (gameId === null) return
     try {
       await api.translate.cancel(gameId)
-    } catch {
-      // ignore
+      disconnectSSE()
+      resetSSE()
+      await fetchStrings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed")
     }
   }
 

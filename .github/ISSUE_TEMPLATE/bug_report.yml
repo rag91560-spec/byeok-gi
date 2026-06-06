@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible Varo problem
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not upload copyrighted game files, API keys, cookies, browser profiles, database backups, or private logs.
+  - type: input
+    id: version
+    attributes:
+      label: Varo version
+      placeholder: "1.4.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Failed workflow
+      options:
+        - scan
+        - translate
+        - apply
+        - rollback
+        - launch packaged app
+        - updater/download
+        - manga OCR
+        - video subtitles
+        - other
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: Game engine or format
+      placeholder: "RPG Maker MV, Unity, Unreal, Wolf RPG, unknown..."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use a small reproducible sequence. Do not attach game files.
+      placeholder: |
+        1. Add game folder...
+        2. Click scan...
+        3. Start apply...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove private paths, keys, cookies, and account data before sharing.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed API keys, cookies, login data, private game files, and database backups.
+          required: true

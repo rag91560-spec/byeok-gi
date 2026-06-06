@@ -17,9 +17,10 @@ where python >nul 2>&1
 if errorlevel 1 (
   echo [dev-launch] WARNING: python not found in PATH. Backend may fail to start.
 )
+if "%GT_BACKEND_PORT%"=="" set "GT_BACKEND_PORT=8001"
 
 echo [dev-launch] Starting Electron + Next.js dev + uvicorn --reload...
-echo [dev-launch] Frontend HMR on :3100, backend reload on :8000
+echo [dev-launch] Frontend HMR on :3100, backend reload on :%GT_BACKEND_PORT%
 echo [dev-launch] Close this window or press Ctrl+C to stop.
 echo.
 
