@@ -13,6 +13,8 @@ const STANDALONE = path.join(ROOT, ".next", "standalone")
 const STATIC = path.join(ROOT, ".next", "static")
 const PUBLIC = path.join(ROOT, "public")
 const OUT = path.join(ROOT, "build-staging", "frontend")
+const UE_SOURCE = process.env.GT_UE_TRANSLATOR_DIR || path.resolve(ROOT, "..", "..", "ue-translator")
+const UE_OUT = path.join(ROOT, "build-staging", "ue-translator")
 
 function copyRecursive(src, dest) {
   if (!fs.existsSync(src)) return
@@ -26,6 +28,31 @@ function copyRecursive(src, dest) {
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.copyFileSync(src, dest)
   }
+}
+
+function prepareUeTranslator() {
+  const moduleFile = path.join(UE_SOURCE, "ue_translator.py")
+  const toolsDir = path.join(UE_SOURCE, "tools")
+
+  if (!fs.existsSync(moduleFile)) {
+    console.error(`[prepare] Missing ue_translator.py: ${moduleFile}`)
+    console.error("[prepare] Set GT_UE_TRANSLATOR_DIR=/path/to/ue-translator or place it at /Users/meanh/ue-translator.")
+    process.exit(1)
+  }
+
+  if (!fs.existsSync(toolsDir)) {
+    console.error(`[prepare] Missing ue-translator tools directory: ${toolsDir}`)
+    process.exit(1)
+  }
+
+  if (fs.existsSync(UE_OUT)) {
+    fs.rmSync(UE_OUT, { recursive: true, force: true })
+  }
+
+  console.log("[prepare] Copying ue-translator package input...")
+  fs.mkdirSync(UE_OUT, { recursive: true })
+  fs.copyFileSync(moduleFile, path.join(UE_OUT, "ue_translator.py"))
+  copyRecursive(toolsDir, path.join(UE_OUT, "tools"))
 }
 
 /**
@@ -70,6 +97,8 @@ copyRecursive(STATIC, path.join(OUT, ".next", "static"))
 
 console.log("[prepare] Copying public files...")
 copyRecursive(PUBLIC, path.join(OUT, "public"))
+
+prepareUeTranslator()
 
 // Verify server.js exists at expected location
 if (fs.existsSync(path.join(OUT, "server.js"))) {

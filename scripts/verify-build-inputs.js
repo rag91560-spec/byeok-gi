@@ -4,13 +4,12 @@ const path = require("path")
 const ROOT = path.join(__dirname, "..")
 const backendBundle = path.join(ROOT, "dist", "backend-dist")
 const backendBinaryName = process.platform === "win32" ? "backend.exe" : "backend"
+const stagedUeTranslator = path.join(ROOT, "build-staging", "ue-translator")
 const checks = [
   ["installer icon", path.join(ROOT, "build", "icon.ico")],
   ["NSIS script", path.join(ROOT, "build", "installer.nsh")],
-  [
-    "ue-translator source",
-    process.env.GT_UE_TRANSLATOR_DIR || path.resolve(ROOT, "..", "..", "ue-translator"),
-  ],
+  ["ue-translator module", path.join(stagedUeTranslator, "ue_translator.py")],
+  ["ue-translator tools", path.join(stagedUeTranslator, "tools")],
   ["backend bundle", backendBundle],
   ["backend executable", path.join(backendBundle, backendBinaryName)],
   ["frontend bundle", path.join(ROOT, "build-staging", "frontend")],

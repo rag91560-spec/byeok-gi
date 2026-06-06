@@ -19,8 +19,16 @@ function copyRecursive(src, dest) {
   }
 }
 
+function resolveResourcesDir(context) {
+  if (context.electronPlatformName === "darwin") {
+    const appName = `${context.packager.appInfo.productFilename}.app`
+    return path.join(context.appOutDir, appName, "Contents", "Resources")
+  }
+  return path.join(context.appOutDir, "resources")
+}
+
 exports.default = async function afterPack(context) {
-  const resourcesDir = path.join(context.appOutDir, "resources")
+  const resourcesDir = resolveResourcesDir(context)
   const frontendSrc = path.join(__dirname, "..", "build-staging", "frontend")
   const frontendDest = path.join(resourcesDir, "frontend")
 

@@ -68,7 +68,7 @@
         "to": "backend-dist"
       },
       {
-        "from": "../../ue-translator",
+        "from": "build-staging/ue-translator",
         "to": "ue-translator",
         "filter": [
           "ue_translator.py",

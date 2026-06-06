@@ -327,7 +327,6 @@ async function startBackend() {
     }
     ensureExecutable(backendExe)
     const dataDir = path.join(app.getPath("userData"), "data")
-    const fs = require("fs")
     fs.mkdirSync(dataDir, { recursive: true })
 
     // One-time migration: copy DB from old location to userData
@@ -485,6 +484,7 @@ async function startFrontend() {
       return
     }
     frontendProcess = fork(serverJs, [], {
+      cwd: path.dirname(serverJs),
       env: {
         ...process.env,
         PORT: String(frontendPort),
@@ -499,8 +499,14 @@ async function startFrontend() {
   }
   if (!frontendProcess) return
   // 파이프 읽되 에러 무시 (EPIPE 방지)
-  frontendProcess.stdout?.on("data", (data) => appendDevLog("frontend-dev.out.log", data))
-  frontendProcess.stderr?.on("data", (data) => appendDevLog("frontend-dev.err.log", data))
+  frontendProcess.stdout?.on("data", (data) => {
+    appendDevLog("frontend-dev.out.log", data)
+    if (!isDev) console.log(`[frontend] ${data.toString().trimEnd()}`)
+  })
+  frontendProcess.stderr?.on("data", (data) => {
+    appendDevLog("frontend-dev.err.log", data)
+    if (!isDev) console.error(`[frontend] ${data.toString().trimEnd()}`)
+  })
   frontendProcess.stdout?.on("error", () => {})
   frontendProcess.stderr?.on("error", () => {})
   frontendProcess.on("error", (error) => {
@@ -950,7 +956,6 @@ ipcMain.handle("launch-native-game", async (event, { exePath }) => {
     throw new Error("Missing executable path")
   }
 
-  const fs = require("fs")
   if (!fs.existsSync(exePath)) {
     throw new Error(`Executable not found: ${exePath}`)
   }
