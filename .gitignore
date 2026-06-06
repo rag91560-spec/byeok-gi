@@ -1,5 +1,9 @@
 node_modules/
+.venv*/
 .next/
+.next-electron-dev/
+.next-electron-dev-*/
+.next-novels-dev/
 out/
 dist/
 build/
@@ -17,6 +21,7 @@ data/thumbnails/
 test_rendered_check.png
 .env
 .env.local
+logs/
 *.exe
 *.dll
 dist-electron/
