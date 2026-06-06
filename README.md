@@ -2,6 +2,8 @@
   <img src="docs/branding/varo-app-icon-thin-rim-transparent-preview.png" alt="Varo app icon" width="128" />
 </p>
 
+<img src="docs/branding/varo-app-icon-thin-rim-transparent-preview.png" alt="Varo app icon" width="128" />
+
 # Varo
 
 AI-assisted desktop tooling for translating Japanese games, manga images, and video subtitles.
