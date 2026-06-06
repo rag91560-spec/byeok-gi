@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/branding/varo-app-icon-thin-rim-transparent-preview.png" alt="Varo app icon" width="128" />
+
 # Varo
 
 ### AI-powered translator for Japanese games, manga & video subtitles
