@@ -1,6 +1,6 @@
 # Impact Evidence
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-12.
 
 This page keeps application and maintainer claims grounded in measured facts. Small numbers are still useful when they are honest.
 
@@ -9,7 +9,7 @@ This page keeps application and maintainer claims grounded in measured facts. Sm
 - Repository: https://github.com/rag91560-spec/varo
 - Visibility: public
 - Created: 2026-03-11
-- Last observed public push/release update: 2026-06-01
+- Last observed public push/release update: 2026-06-12
 - GitHub stars: 3
 - GitHub forks: 0
 - GitHub watchers: 0
@@ -31,10 +31,10 @@ This page keeps application and maintainer claims grounded in measured facts. Sm
 
 ## Maintenance Activity
 
-- Local repository commits observed: 38
-- Commits in the last 90 days: 38
+- Local repository commits observed: 44
+- Commits in the last 90 days: 27
 - Commits in the last 30 days: 8
-- Current package version: `1.4.3`
+- Current package version: `1.4.4`
 - Primary languages by public GitHub API: TypeScript and Python, with JavaScript, CSS, and Batchfile support files.
 
 ## Product Scope
@@ -81,5 +81,5 @@ Beta or active-maintenance coverage:
 
 - GitHub issue and PR volume is currently low.
 - Direct/private download count is maintainer-reported and should be replaced or backed with server-side logs if available.
-- Public history contains previously tracked browser profile paths; see `docs/security-history-review.md`.
+- GitHub Support cleanup is still requested for one affected hidden PR ref and cached views after the public history rewrite; see `docs/security-history-review.md`.
 - More real-game compatibility reports are needed for beta engines.

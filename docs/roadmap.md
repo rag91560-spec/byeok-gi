@@ -4,8 +4,8 @@ This roadmap prioritizes maintenance quality over broad feature growth.
 
 ## Near Term
 
-- Complete public repository hygiene for Codex OSS application readiness.
-- Resolve the public-history decision for previously tracked browser profile artifacts.
+- Submit the Codex OSS application after recording the GitHub Support cleanup outcome or pending status.
+- Preserve public repository hygiene after the completed history rewrite.
 - Keep README, legal, security, and contribution docs accurate.
 - Add regression coverage for high-risk apply/rollback paths.
 - Improve issue templates so game compatibility reports arrive with enough context.

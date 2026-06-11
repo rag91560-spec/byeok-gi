@@ -1,6 +1,6 @@
 # Codex OSS Application Draft
 
-Last updated: 2026-06-05.
+Last updated: 2026-06-12.
 
 Source criteria: https://openai.com/form/codex-for-oss/
 
@@ -24,13 +24,13 @@ Varo is a public MIT desktop tool for AI-assisted game localization. It maintain
 
 I would use API credits for maintainer automation: issue triage and duplicate clustering, PR review, parser/apply regression-test generation, Electron/FastAPI security review, release checklist automation, and release-note drafting. The goal is to reduce maintenance load while keeping Varo's local-first behavior and release safety checks honest.
 
-### Anything else we should know? (361/500 chars)
+### Anything else we should know? (384/500 chars)
 
-I am interested in both API credits and Codex Security. The highest-risk areas are Electron main/preload boundaries, local FastAPI file routes, API-key storage, update/download behavior, local database handling, and apply/rollback paths. Before submitting, I will resolve or disclose the old public-history browser-profile artifact issue documented in the repo.
+I am interested in both API credits and Codex Security. The highest-risk areas are Electron main/preload boundaries, local FastAPI file routes, API-key storage, update/download behavior, local database handling, and apply/rollback paths. Repository history was rewritten to remove old browser-profile/cache artifacts; GitHub Support cleanup is requested for the affected PR ref/cache.
 
 ## Pre-Submit Gate
 
-- Resolve the public-history decision in `docs/security-history-review.md`, or disclose the current-tree/history distinction plainly.
+- Submit the GitHub Support request in `docs/github-support-sensitive-data-request.md`, then record the support outcome or disclose that hidden PR-ref/cache cleanup is pending.
 - Back the 100+ direct/private download claim with server logs if available. If logs are not available, keep the wording as maintainer-reported.
 - Verify the GitHub profile and repository are public.
 - Have the OpenAI Organization ID ready before opening the form.
@@ -49,7 +49,7 @@ Varo is a public MIT desktop tool for AI-assisted game localization. It handles 
 
 ## Product Usage / Impact
 
-As of 2026-06-01, Varo is public with 3 GitHub stars, a current v1.4.3 GitHub release, 4 observed legacy GitHub-release downloads, a maintainer-reported 100+ direct/private downloads, and a 73-member Discord support community. Direct/private downloads should be backed by server logs before final submission.
+As of 2026-06-12, Varo is public with 3 GitHub stars, a current v1.4.3 GitHub release, 4 observed legacy GitHub-release downloads, a maintainer-reported 100+ direct/private downloads, and a 73-member Discord support community. Direct/private downloads should be backed by server logs before final submission.
 
 ## API Credit Usage
 
@@ -61,4 +61,4 @@ Codex Security would help review Electron preload/main boundaries, local FastAPI
 
 ## Additional Context
 
-The v1.4.3 GitHub release is now published. The current tree removes previously tracked browser profile artifacts, but public history still needs a maintainer decision before pushing the main branch or submitting the application.
+The v1.4.3 GitHub release is published, and `package.json` is now on a v1.4.4 release-candidate line. Public branch/tag history has been rewritten to remove old browser-profile/cache artifacts. GitHub Support cleanup is still requested for the affected hidden PR ref and cached views.

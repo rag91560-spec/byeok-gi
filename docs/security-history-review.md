@@ -1,12 +1,12 @@
 # Security History Review
 
-Last updated: 2026-05-31.
+Last updated: 2026-06-12.
 
 ## Summary
 
-The current `HEAD` removes tracked browser profile/cache artifacts from the working tree and `.gitignore` now blocks them from returning. However, `origin/master` and repository history still contain browser-profile paths under `marketing/profiles`.
+The repository history was rewritten on 2026-06-12 with `git-filter-repo --sensitive-data-removal` after maintainer approval. The public `master` branch and release tags no longer contain the previously tracked browser profile/cache artifacts or generated build artifacts listed below.
 
-Do not push or submit the Codex OSS application as "fully clean" until the history decision below is resolved.
+GitHub rejected direct updates to `refs/pull/1/head`, which is a hidden pull-request ref. GitHub Support still needs to remove cached views / pull-request refs and run repository garbage collection before this incident can be treated as fully closed on GitHub infrastructure.
 
 ## Current Tree Scan
 
@@ -21,28 +21,35 @@ Result:
 - No literal API keys or tokens were found.
 - Environment-variable references were found for provider and Discord tokens; those are expected code references, not secrets.
 
-## Public History Risk
+## History Rewrite
 
-`origin/master` includes paths such as:
+Removed path families:
 
-- `marketing/profiles/*/Default/Network/Cookies`
-- `marketing/profiles/*/Default/Login Data`
-- `marketing/profiles/*/Default/Local Storage`
-- `marketing/profiles/*/Default/Session Storage`
-- `marketing/profiles/*/Default/Secure Preferences`
-- `marketing/profiles/*/Local State`
+- `marketing/profiles/**`
+- `data/covers/**`
+- `LICENSE.txt.bak`
+- `tsconfig.tsbuildinfo`
 
-These are browser profile artifact paths. Even if the content is not inspected here, their presence is enough to treat the history as privacy-sensitive until reviewed.
+Rewrite evidence:
 
-## Decision Needed Before Push or Application
+- Tool: `git-filter-repo` 2.47.0
+- Commits rewritten: 45 of 45
+- First changed commit: `be5bf5d83c49713ff134d66992c6498e8298fba6`
+- Rewritten commit: `cdf24790fa2e49e75ff095425d1f0561a7900d8b`
+- LFS: not in use
 
-Choose one:
+Verification after rewrite:
 
-1. Push the current cleanup commit and disclose that current tree is clean, while accepting that old public history may still contain profile artifacts.
-2. Rewrite public history to remove `marketing/profiles/**`, then force-push after maintainer approval.
-3. Create a fresh public repository/import without the sensitive history, then point the application to the clean repo.
+- `git rev-list --objects --all | rg ' (marketing/profiles|data/covers|LICENSE\.txt\.bak|tsconfig\.tsbuildinfo)' | wc -l` returned `0`.
+- Representative high-confidence token pattern search found no matches for OpenAI, GitHub, or Slack-style token formats.
+- `git fsck --unreachable --no-reflogs` returned no output after local reflog expiry and garbage collection.
+- Public remote refs after cleanup: `master`, `v1.3.9`, and `v1.4.3`.
 
-Recommended path: option 3 if the repo has low public dependency and preserving current history is not important; option 2 only if the maintainer explicitly accepts public-history rewrite risk.
+## Remaining GitHub Support Step
+
+Open a GitHub Support ticket requesting removal of the affected hidden pull-request ref / cached views and repository garbage collection. Use `docs/github-support-sensitive-data-request.md` as the support-ticket source text.
+
+Do not merge or push from old clones. Existing clones should be discarded and re-cloned, or cleaned with the official sensitive-data-removal procedure.
 
 ## Standing Rule
 
